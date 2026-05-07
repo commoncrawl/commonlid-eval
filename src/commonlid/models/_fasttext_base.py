@@ -2,12 +2,58 @@
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Sequence
+from pathlib import Path
 
 import fasttext
 from huggingface_hub import hf_hub_download
 
 from commonlid.core.lid_model import LIDModel
+
+_FASTTEXT_FILEFORMAT_MAGIC_INT32 = 793712314
+
+
+def _read_labels_from_bin(path: str | Path) -> list[str]:
+    """Parse the labels block out of a fasttext ``model.bin`` file.
+
+    The runtime dep ``fasttext-predict`` is inference-only and exposes only
+    ``predict`` / ``multilinePredict`` — no ``get_labels()``. Read the file
+    directly so :meth:`FastTextHubModel.discover_supported_languages` works
+    under either binding.
+
+    File layout (little-endian; mirrors FastText's ``saveModel`` +
+    ``Dictionary::save`` in the upstream C++ source):
+      - 8 bytes:  magic ``int32`` + version ``int32``
+      - 56 bytes: 12 ``int32`` + 1 ``double`` (Args block)
+      - 12 bytes: ``size_``, ``nwords_``, ``nlabels_`` (3 ``int32``)
+      - 16 bytes: ``ntokens_``, ``pruneidx_size_`` (2 ``int64``)
+      - then ``size_`` entries: NUL-terminated UTF-8 word, ``int64`` count,
+        ``int8`` entry type (``0`` = word, ``1`` = label).
+    """
+    with Path(path).open("rb") as f:
+        magic, _version = struct.unpack("<ii", f.read(8))
+        if magic != _FASTTEXT_FILEFORMAT_MAGIC_INT32:
+            msg = f"Not a fasttext model.bin (magic={magic:#x}): {path}"
+            raise ValueError(msg)
+        f.read(56)  # Args: 12 int32 + 1 double
+        size_, _nwords, nlabels_ = struct.unpack("<3i", f.read(12))
+        f.read(16)  # ntokens_ + pruneidx_size_
+        labels: list[str] = []
+        for _ in range(size_):
+            word_bytes = bytearray()
+            while True:
+                b = f.read(1)
+                if not b or b == b"\0":
+                    break
+                word_bytes.extend(b)
+            f.read(8)  # count int64
+            entry_type = f.read(1)
+            if entry_type == b"\x01":
+                labels.append(word_bytes.decode("utf-8"))
+                if len(labels) == nlabels_:
+                    break
+    return labels
 
 
 class FastTextHubModel(LIDModel):
@@ -23,11 +69,13 @@ class FastTextHubModel(LIDModel):
     def __init__(self) -> None:
         super().__init__()
         self._ft: fasttext.FastText._FastText | None = None
+        self._model_path: str | None = None
 
     def load(self) -> None:
         if self._loaded:
             return
         path = hf_hub_download(repo_id=self.hf_repo_id, filename=self.hf_filename)
+        self._model_path = path
         self._ft = fasttext.load_model(path)
         super().load()
 
@@ -72,12 +120,24 @@ class FastTextHubModel(LIDModel):
         return list(predicted)
 
     def discover_supported_languages(self) -> frozenset[str]:
-        """Enumerate every ``__label__{code}`` exposed by the loaded fasttext model."""
+        """Enumerate every ``__label__{code}`` exposed by the loaded fasttext model.
+
+        ``fasttext-wheel`` exposes ``get_labels()`` on the loaded model;
+        ``fasttext-predict`` (the lighter inference-only fork we depend on at
+        runtime) does not. Fall back to parsing the dictionary block out of
+        ``model.bin`` directly when ``get_labels`` is missing.
+        """
         if self._ft is None:
             self.load()
         assert self._ft is not None
+        get_labels = getattr(self._ft, "get_labels", None)
+        if get_labels is not None:
+            raw_labels = list(get_labels())
+        else:
+            assert self._model_path is not None  # set by load()
+            raw_labels = _read_labels_from_bin(self._model_path)
         codes: set[str] = set()
-        for label in self._ft.get_labels():
+        for label in raw_labels:
             if not label.startswith("__label__"):
                 continue
             raw = label.split("__")[2].split("_")[0]

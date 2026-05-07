@@ -841,7 +841,7 @@ class FunLangID:
             ),
             (
                 "zxx-x-arabocr",
-                " /j/^/i/jl/j j/./l/jj/^ ^/jjj/jjl/*/^ j/jli/jji/jl j/jlj/i j/j ^/ji j/ji/a/)/t/^jl/-/1/u/•/j^j/^j/^jj/j jj/4/i ^/l j/j i/jij/ijl/j 4/jl ^/o/l ^/: j/y/j jl/'/jj j/j^/4 j/j*/ijj/^1/j t/ji ^/aj/:/ij/l jj/>/i jj/c/^ji/jui/aji/l jl/1 ^/juj/ill/ajl/j ^j/ju/lj/1 j/v/f/uji/iji/^ 1/j l/i jl/j 1/jj^/lil/jju/jll/</jjjj/\/ujl/ajj/^ i/(/j^i/l^j/jaj/r/s/ja/ll j/^ij/,/t j/ljl/jjjl/li/ljj/jp/u j/jlp/* j/jl^/* ^/il j/lj j/j^l/jj ^/lji/lij/t ^/jt/l ^j/jls/■/uj/j j^/ii/0/jii/m/a j/^^/»/j u/i i/^ l/p/j c/j ij/ij j/3/j a/4 ^/^j j/jil/jj-/^ u/^lj/jla ".strip().split(
+                r" /j/^/i/jl/j j/./l/jj/^ ^/jjj/jjl/*/^ j/jli/jji/jl j/jlj/i j/j ^/ji j/ji/a/)/t/^jl/-/1/u/•/j^j/^j/^jj/j jj/4/i ^/l j/j i/jij/ijl/j 4/jl ^/o/l ^/: j/y/j jl/'/jj j/j^/4 j/j*/ijj/^1/j t/ji ^/aj/:/ij/l jj/>/i jj/c/^ji/jui/aji/l jl/1 ^/juj/ill/ajl/j ^j/ju/lj/1 j/v/f/uji/iji/^ 1/j l/i jl/j 1/jj^/lil/jju/jll/</jjjj/\/ujl/ajj/^ i/(/j^i/l^j/jaj/r/s/ja/ll j/^ij/,/t j/ljl/jjjl/li/ljj/jp/u j/jlp/* j/jl^/* ^/il j/lj j/j^l/jj ^/lji/lij/t ^/jt/l ^j/jls/■/uj/j j^/ii/0/jii/m/a j/^^/»/j u/i i/^ l/p/j c/j ij/ij j/3/j a/4 ^/^j j/jil/jj-/^ u/^lj/jla ".strip().split(
                     "/"
                 ),
             ),
@@ -2431,7 +2431,7 @@ class FunLangID:
             ),
             (
                 "zxx-x-latnunk",
-                " jjjj/klzz/lzzw/zzwx/zwxh/wxh:/klz/kl/tk-/, tk/xh:1/xh:2/tk-3/tk-2/esa/0, t/gsa/kkkk/..../ksa/.tk/dks/hhhh/vga/ds/k/xh:5/.../t.../kt../tk2/0sw/se/sw/g, t/tk l/k-31/sec/http/0se/ttp:/tp:/p:/0ne/0nw./sa d/xh:4/lin/link/k li/ink_/nk_5/k_50/ne/2  k/hkh/----/cm/7  k/vk/9  k/4  k/xh:3/jjj/k-21/h:16/gks/k-37/a kl/h:11/mem/ga k/h:15/h:18/1  k/6  k/8  k/xh:6/2, t/tk/dh/dk/0  k/0 tk/3  k/5  k/h:14/h:17/\/k gs/hkk/h:13/k-27/vks/h:20/ksj/tk3/fy,/vksj/gggg/60,/tk-8/201/1/kjh/h:19/nw/h:12/-310/www/tk-7/8, t/www./cm,/100/a dk/0/h:24/k-32/ls/.. t/...1/00 0/. tk/h:10/0g,/k tk/00,/m kl/h:21/-320/0 00/ne 1/-210/60/= 3/p kl/k-22/,oa/tk24/1, t/02,/004/c kl/writ/wri/rite/rk g/ds f/r kl ".strip().split(
+                r" jjjj/klzz/lzzw/zzwx/zwxh/wxh:/klz/kl/tk-/, tk/xh:1/xh:2/tk-3/tk-2/esa/0, t/gsa/kkkk/..../ksa/.tk/dks/hhhh/vga/ds/k/xh:5/.../t.../kt../tk2/0sw/se/sw/g, t/tk l/k-31/sec/http/0se/ttp:/tp:/p:/0ne/0nw./sa d/xh:4/lin/link/k li/ink_/nk_5/k_50/ne/2  k/hkh/----/cm/7  k/vk/9  k/4  k/xh:3/jjj/k-21/h:16/gks/k-37/a kl/h:11/mem/ga k/h:15/h:18/1  k/6  k/8  k/xh:6/2, t/tk/dh/dk/0  k/0 tk/3  k/5  k/h:14/h:17/\/k gs/hkk/h:13/k-27/vks/h:20/ksj/tk3/fy,/vksj/gggg/60,/tk-8/201/1/kjh/h:19/nw/h:12/-310/www/tk-7/8, t/www./cm,/100/a dk/0/h:24/k-32/ls/.. t/...1/00 0/. tk/h:10/0g,/k tk/00,/m kl/h:21/-320/0 00/ne 1/-210/60/= 3/p kl/k-22/,oa/tk24/1, t/02,/004/c kl/writ/wri/rite/rk g/ds f/r kl ".strip().split(
                     "/"
                 ),
             ),
