@@ -60,7 +60,9 @@ llm = [
 ]
 cld3 = ["cld3-py>=3.1"]
 leaderboard = [
-    "gradio>=4.44",
+    # gradio 4.x imports HfFolder from huggingface_hub, which was removed in
+    # huggingface-hub 1.0; gradio 5 dropped that import.
+    "gradio>=5",
 ]
 dev = [
     # duplicate of the `llm` extra so the test suite can exercise DSPyLLMModel
@@ -71,7 +73,7 @@ dev = [
     # duplicate of the `cld3` extra so the test suite can exercise CLD3Model
     "cld3-py>=3.1",
     # duplicate of the `leaderboard` extra so the test suite can import the app.
-    "gradio>=4.44",
+    "gradio>=5",
     "ruff>=0.6",
     "mypy>=1.11",
     "pytest>=8",
