@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version as _pkg_version
 
 from typer.testing import CliRunner
 
@@ -14,6 +15,16 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert __version__ in result.stdout
+
+
+def test_version_matches_package_metadata() -> None:
+    """``commonlid.__version__`` must track the wheel's installed metadata.
+
+    Catches the failure mode where the publish workflow bumps
+    ``pyproject.toml`` but a hand-kept version constant inside the package
+    drifts. The two should never diverge at runtime.
+    """
+    assert __version__ == _pkg_version("commonlid")
 
 
 def test_list_models_json_contains_known_models() -> None:
