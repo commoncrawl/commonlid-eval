@@ -17,7 +17,7 @@ PACKAGE := src/commonlid
         lint format format-check typecheck \
         test test-slow test-all check \
         build clean \
-        notebooks leaderboard leaderboard-upload
+        notebooks leaderboard leaderboard-hf leaderboard-upload
 
 help:
 	@echo "Targets:"
@@ -40,6 +40,7 @@ help:
 	@echo "  build                 uv build (sdist + wheel)"
 	@echo "  notebooks             jupyter lab notebooks/paper_tables.ipynb"
 	@echo "  leaderboard           Serve the Gradio leaderboard from ./data/results"
+	@echo "  leaderboard-hf        Serve the Gradio leaderboard from the live HF dataset (mirrors the Space)"
 	@echo "  leaderboard-upload    Open a PR on commoncrawl/commonlid-results from ./data/results"
 	@echo "  clean                 Remove build artefacts and tool caches"
 	@echo ""
@@ -99,6 +100,11 @@ LEADERBOARD_REPO ?= commoncrawl/commonlid-results
 
 leaderboard: install-leaderboard
 	uv run commonlid leaderboard serve --local-dir $(LEADERBOARD_DIR)
+
+# Mirrors the deployed Space: pulls summaries from the live HF dataset
+# (commoncrawl/commonlid-results) instead of a local directory.
+leaderboard-hf: install-leaderboard
+	uv run commonlid leaderboard serve --repo-id $(LEADERBOARD_REPO)
 
 leaderboard-upload: install-leaderboard
 	uv run commonlid leaderboard upload \
