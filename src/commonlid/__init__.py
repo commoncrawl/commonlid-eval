@@ -6,6 +6,7 @@
 # model's ``load()``), so this stays cheap.
 from commonlid import datasets as _tasks  # noqa: F401
 from commonlid import models as _models  # noqa: F401
+from commonlid._version import __version__
 from commonlid.core.lid_dataset import LIDDataset, PrivateDatasetAccessError
 from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import (
@@ -18,8 +19,6 @@ from commonlid.core.registry import (
 )
 from commonlid.evaluation.evaluator import Evaluator
 from commonlid.evaluation.results import Result
-
-__version__ = "0.1.0"
 
 __all__ = [
     "Evaluator",
