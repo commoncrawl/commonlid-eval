@@ -1,0 +1,1 @@
+- use uv instead of pip

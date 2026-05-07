@@ -1,0 +1,10 @@
+{"raw": "Hello world!", "clean": "hello world"}
+{"raw": "  Leading and trailing   ", "clean": "leading and trailing"}
+{"raw": "Line one\nLine two", "clean": "line one line two"}
+{"raw": "Digits 12345 and symbols !@#$%", "clean": "digits and symbols "}
+{"raw": "UPPERCASE", "clean": "uppercase"}
+{"raw": "Multiple   spaces\t\tand\ttabs", "clean": "multiple spacesandtabs"}
+{"raw": "Caf\u00e9 r\u00e9sum\u00e9 na\u00efve", "clean": "caf\u00e9 r\u00e9sum\u00e9 na\u00efve"}
+{"raw": "T\u00f4i y\u00eau Vi\u1ec7t Nam 123", "clean": "t\u00f4i y\u00eau vi\u1ec7t nam "}
+{"raw": "\u4e2d\u6587 test", "clean": "\u4e2d\u6587 test"}
+{"raw": "emoji \ud83d\ude00 test", "clean": "emoji test"}

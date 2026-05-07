@@ -1,0 +1,174 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Which part of the version to bump (semver). Ignored when dry_run is checked."
+        type: choice
+        required: true
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: >-
+          TestPyPI-only rehearsal. Builds a .devN PEP 440 pre-release from
+          the current pyproject.toml version (no commit, no tag, no
+          pypi.org upload, no GitHub release). Safe to run repeatedly.
+        type: boolean
+        default: false
+
+# Serialize concurrent publish attempts so version-bumps and tag pushes
+# can't race each other.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. Either (real release) bump pyproject.toml + uv.lock, commit, tag,
+  #    then build; or (dry run) build an ephemeral .devN version
+  #    identified by the workflow run number.
+  # -------------------------------------------------------------------------
+  bump-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version-bump commit + tag (real releases only)
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      dry_run: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Configure git identity
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: bump
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            # Dry run: keep current base, append a dev-N suffix so every
+            # rehearsal gets a unique PEP 440 pre-release that TestPyPI
+            # will accept. No commit, no tag.
+            BASE=$(uv version --short)
+            DEV_VERSION="${BASE}.dev${GITHUB_RUN_NUMBER}"
+            uv version "$DEV_VERSION"
+            echo "version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          else
+            uv version --bump "${{ inputs.version_bump }}"
+            VERSION=$(uv version --short)
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify version is valid PEP 440
+        run: uv run python -c "import re, sys; v='${{ steps.bump.outputs.version }}'; assert re.match(r'^[0-9]+\.[0-9]+\.[0-9]+([a-z0-9.+-]*)?$', v), v; print('OK', v)"
+
+      - name: Commit + tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git add pyproject.toml uv.lock
+          git commit -m "chore(release): ${{ steps.bump.outputs.tag }}"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "Release ${{ steps.bump.outputs.tag }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Upload dist/
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # -------------------------------------------------------------------------
+  # 2. Publish to TestPyPI via OIDC trusted publisher. Runs for both real
+  #    releases and dry runs.
+  # -------------------------------------------------------------------------
+  publish-testpypi:
+    needs: bump-and-build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/commonlid/${{ needs.bump-and-build.outputs.version }}
+    permissions:
+      id-token: write # OIDC token for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  # -------------------------------------------------------------------------
+  # 3. Publish to production PyPI. Skipped on dry runs. Gated on TestPyPI
+  #    succeeding so every real release goes through the rehearsal channel
+  #    first.
+  # -------------------------------------------------------------------------
+  publish-pypi:
+    needs: [bump-and-build, publish-testpypi]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/commonlid/${{ needs.bump-and-build.outputs.version }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # -------------------------------------------------------------------------
+  # 4. Cut the GitHub release on the tag. Skipped on dry runs (there is no
+  #    tag to release against).
+  # -------------------------------------------------------------------------
+  github-release:
+    needs: [bump-and-build, publish-pypi]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-and-build.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.bump-and-build.outputs.tag }}" \
+            dist/* \
+            --title "${{ needs.bump-and-build.outputs.tag }}" \
+            --generate-notes \
+            --verify-tag

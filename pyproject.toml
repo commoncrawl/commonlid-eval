@@ -1,0 +1,218 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "commonlid"
+version = "0.1.0"
+description = "Evaluate language identification models on CommonLID and other benchmarks."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Common Crawl" }]
+requires-python = ">=3.10"
+keywords = ["language-identification", "lid", "nlp", "benchmark", "commonlid"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "datasets>=3.1.0",
+    # `fasttext-wheel` stops shipping prebuilt wheels at cp311 and its 0.9.2
+    # source tarball fails to compile under modern GCC (missing <cstdint>).
+    # `fasttext-predict` is a maintained fork that provides the same
+    # `fasttext.load_model(...).predict(...)` API and ships cp313 wheels.
+    "fasttext-predict>=0.9.2",
+    "huggingface-hub>=0.26",
+    "iso639-lang==2.5.1",
+    "numpy>=1.26,<3",
+    "pandas>=2.1",
+    "pycld2>=0.42",
+    "pyfranc>=0.2.3",
+    "regex>=2024.11.6",
+    "scikit-learn>=1.5",
+    "tqdm>=4.67",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+afrolid = [
+    # transformers 5.x has a regression in the XLM-RoBERTa SPM tokenizer
+    # (Unigram(vocab=dict) raises TypeError) — AfroLID is XLM-RoBERTa based,
+    # so we pin to the 4.x series until the upstream fix lands.
+    "transformers>=4.46,<5",
+    "torch>=2.4",
+    "protobuf>=4.25",
+    "sentencepiece>=0.2",
+]
+llm = [
+    "dspy>=2.5",
+    "azure-identity>=1.17",
+    "fsspec>=2024.6",
+    "botocore>=1.35",
+]
+cld3 = ["cld3-py>=3.1"]
+leaderboard = [
+    "gradio>=4.44",
+]
+dev = [
+    # duplicate of the `llm` extra so the test suite can exercise DSPyLLMModel
+    "dspy>=2.5",
+    "azure-identity>=1.17",
+    "fsspec>=2024.6",
+    "botocore>=1.35",
+    # duplicate of the `cld3` extra so the test suite can exercise CLD3Model
+    "cld3-py>=3.1",
+    # duplicate of the `leaderboard` extra so the test suite can import the app.
+    "gradio>=4.44",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "types-regex",
+    "types-tqdm",
+]
+notebooks = [
+    "jupyterlab>=4.3",
+    "langid>=1.1.6",
+    "matplotlib>=3.9",
+    "nbclient>=0.10",
+]
+all = [
+    "commonlid[afrolid,llm]",
+]
+
+[project.scripts]
+commonlid = "commonlid.cli:app"
+
+[project.urls]
+Homepage = "https://huggingface.co/datasets/commoncrawl/CommonLID"
+Paper = "https://arxiv.org/abs/2601.18026"
+Repository = "https://github.com/commoncrawl/commonlid-eval"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/commonlid"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/commonlid",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+    "docs",
+    "tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["src/commonlid/vendor", "tests/legacy"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "PT",   # flake8-pytest-style
+    "RUF",  # ruff-specific rules
+    "ARG",  # flake8-unused-arguments
+    "PTH",  # flake8-use-pathlib
+    "ERA",  # eradicate commented-out code
+    "TID",  # flake8-tidy-imports
+]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B008",   # function calls in argument defaults (Typer)
+]
+preview = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002", "PT011", "RUF069"]
+"src/commonlid/vendor/**" = ["ALL"]
+"tests/legacy/**" = ["ALL"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["commonlid"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.mypy]
+# The codebase targets 3.10 at the low end; lint it under that version so
+# type-check errors match the oldest supported interpreter.
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+warn_redundant_casts = true
+packages = ["commonlid"]
+mypy_path = "src"
+exclude = ["src/commonlid/vendor/", "tests/legacy/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "fasttext.*",
+    "pycld2.*",
+    "pyfranc.*",
+    "iso639.*",
+    "datasets.*",
+    "huggingface_hub.*",
+    "dspy.*",
+    "azure.*",
+    "transformers.*",
+    "torch.*",
+    "gcld3.*",
+    "pandas.*",
+    "sklearn.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "-m",
+    "not slow and not network",
+    "--cov=commonlid",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+]
+markers = [
+    "slow: marks tests that require model downloads or are otherwise slow",
+    "network: marks tests that need network access",
+]
+
+[tool.coverage.run]
+source = ["src/commonlid"]
+omit = [
+    "src/commonlid/vendor/*",
+    "src/commonlid/__main__.py",
+    # afrolid needs the heavy `[afrolid]` extra (torch + transformers); not
+    # installed in dev and so exercised only via mocked unit tests.
+    "src/commonlid/models/afrolid.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+

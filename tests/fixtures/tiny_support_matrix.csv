@@ -1,0 +1,9 @@
+language iso639-3,model_a,model_b,model_c
+eng,1,1,1
+deu,1,1,0
+fra,1,0,1
+spa,1,0,0
+zho,0,1,1
+ara,0,1,0
+jpn,0,0,1
+rus,1,1,1
