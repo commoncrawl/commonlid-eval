@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -57,6 +58,80 @@ def test_fasttext_base_parses_labels() -> None:
     assert "eng" in langs
     assert "jav" in langs  # 'jw' was conformed to 'jav'
     assert "xyz" not in langs
+
+
+def test_read_labels_from_bin_parses_minimal_blob(tmp_path: Path) -> None:
+    """Round-trip a minimal fasttext binary blob through the file parser."""
+    import struct
+
+    from commonlid.models._fasttext_base import _read_labels_from_bin
+
+    entries = [
+        ("hello", 17, 0),  # word
+        ("world", 5, 0),  # word
+        ("__label__eng_Latn", 100, 1),  # label
+        ("__label__jw_Latn", 7, 1),  # label
+    ]
+    nwords = sum(1 for _, _, t in entries if t == 0)
+    nlabels = sum(1 for _, _, t in entries if t == 1)
+
+    blob = bytearray()
+    blob += struct.pack("<ii", 793712314, 12)  # magic + version
+    blob += struct.pack("<12id", *([1] * 12), 0.0001)  # Args block (12 int32 + 1 double)
+    blob += struct.pack("<3i", len(entries), nwords, nlabels)  # size_, nwords_, nlabels_
+    blob += struct.pack("<2q", 0, -1)  # ntokens_, pruneidx_size_
+    for word, count, entry_type in entries:
+        blob += word.encode("utf-8") + b"\0"
+        blob += struct.pack("<q", count)
+        blob += struct.pack("<b", entry_type)
+
+    path = tmp_path / "fake_model.bin"
+    path.write_bytes(bytes(blob))
+    assert _read_labels_from_bin(path) == ["__label__eng_Latn", "__label__jw_Latn"]
+
+
+def test_read_labels_from_bin_rejects_bad_magic(tmp_path: Path) -> None:
+    from commonlid.models._fasttext_base import _read_labels_from_bin
+
+    path = tmp_path / "garbage.bin"
+    path.write_bytes(b"NOTAFASTTEXTMODEL" + b"\0" * 200)
+    with pytest.raises(ValueError, match=r"Not a fasttext model\.bin"):
+        _read_labels_from_bin(path)
+
+
+def test_fasttext_base_falls_back_to_file_when_get_labels_missing(
+    tmp_path: Path,
+) -> None:
+    """`fasttext-predict` exposes no get_labels(); we must read the file directly."""
+    import struct
+
+    from commonlid.models._fasttext_base import FastTextHubModel
+
+    blob = bytearray()
+    blob += struct.pack("<ii", 793712314, 12)
+    blob += struct.pack("<12id", *([1] * 12), 0.0001)
+    blob += struct.pack("<3i", 2, 0, 2)
+    blob += struct.pack("<2q", 0, -1)
+    for word in (b"__label__eng_Latn", b"__label__jw_Latn"):
+        blob += word + b"\0" + struct.pack("<q", 1) + struct.pack("<b", 1)
+    path = tmp_path / "stub.bin"
+    path.write_bytes(bytes(blob))
+
+    class _PredictOnlyFT:
+        # Mirrors fasttext-predict: no get_labels.
+        def predict(self, texts: list[str]) -> list[list[str]]:
+            return [["__label__eng_Latn"] for _ in texts]
+
+    class _Model(FastTextHubModel):
+        model_id = "_fasttext_predict_stub"
+        hf_repo_id = "stub/stub"
+
+    m = _Model()
+    m._ft = _PredictOnlyFT()  # type: ignore[assignment]
+    m._model_path = str(path)
+    m._loaded = True
+    langs = m.discover_supported_languages()
+    assert langs == frozenset({"eng", "jav"})  # 'jw' conformed to 'jav'
 
 
 def test_base_default_returns_supported_languages_attr() -> None:
