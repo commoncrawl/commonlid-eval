@@ -1,4 +1,4 @@
 # The Space pulls the package from PyPI with the leaderboard extra so the
 # Gradio entrypoint and `commonlid leaderboard serve` CLI stay in sync. Pin a
 # concrete release here once we tag one (e.g. `commonlid[leaderboard]==0.1.0`).
-commonlid[leaderboard]
+commonlid[leaderboard]==0.2.2
