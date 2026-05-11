@@ -13,7 +13,7 @@ PACKAGE := src/commonlid
 .DEFAULT_GOAL := help
 
 .PHONY: help venv \
-        install install-all install-afrolid install-notebooks install-leaderboard \
+        install install-all install-afrolid install-commonlingua install-notebooks install-leaderboard \
         lint format format-check typecheck \
         test test-slow test-all check \
         build clean \
@@ -24,6 +24,7 @@ help:
 	@echo "  venv                  Create a uv-managed virtualenv (.venv)"
 	@echo "  install               Sync runtime + dev extras (lint/type/test)"
 	@echo "  install-afrolid       install + the heavy [afrolid] extra (torch + transformers)"
+	@echo "  install-commonlingua  install + the [commonlingua] extra (torch only)"
 	@echo "  install-notebooks     install + the [notebooks] extra (jupyterlab + matplotlib)"
 	@echo "  install-leaderboard   install + the [leaderboard] extra (gradio)"
 	@echo "  install-all           install + every optional extra"
@@ -55,6 +56,9 @@ install:
 install-afrolid:
 	uv sync --extra dev --extra afrolid $(PYTHON_FLAG)
 
+install-commonlingua:
+	uv sync --extra dev --extra commonlingua $(PYTHON_FLAG)
+
 install-notebooks:
 	uv sync --extra dev --extra notebooks $(PYTHON_FLAG)
 
@@ -62,7 +66,7 @@ install-leaderboard:
 	uv sync --extra dev --extra leaderboard $(PYTHON_FLAG)
 
 install-all:
-	uv sync --extra dev --extra afrolid --extra notebooks --extra leaderboard $(PYTHON_FLAG)
+	uv sync --extra dev --extra afrolid --extra commonlingua --extra notebooks --extra leaderboard $(PYTHON_FLAG)
 
 lint:
 	uv run ruff check $(SRC_DIRS)

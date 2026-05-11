@@ -864,6 +864,9 @@ all = [
 cld3 = [
     { name = "cld3-py" },
 ]
+commonlingua = [
+    { name = "torch" },
+]
 dev = [
     { name = "azure-identity" },
     { name = "botocore" },
@@ -902,7 +905,7 @@ requires-dist = [
     { name = "botocore", marker = "extra == 'llm'", specifier = ">=1.35" },
     { name = "cld3-py", marker = "extra == 'cld3'", specifier = ">=3.1" },
     { name = "cld3-py", marker = "extra == 'dev'", specifier = ">=3.1" },
-    { name = "commonlid", extras = ["afrolid", "llm"], marker = "extra == 'all'" },
+    { name = "commonlid", extras = ["afrolid", "llm", "commonlingua"], marker = "extra == 'all'" },
     { name = "datasets", specifier = ">=3.1.0" },
     { name = "dspy", marker = "extra == 'dev'", specifier = ">=2.5" },
     { name = "dspy", marker = "extra == 'llm'", specifier = ">=2.5" },
@@ -930,13 +933,14 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "sentencepiece", marker = "extra == 'afrolid'", specifier = ">=0.2" },
     { name = "torch", marker = "extra == 'afrolid'", specifier = ">=2.4" },
+    { name = "torch", marker = "extra == 'commonlingua'", specifier = ">=2.4" },
     { name = "tqdm", specifier = ">=4.67" },
     { name = "transformers", marker = "extra == 'afrolid'", specifier = ">=4.46,<5" },
     { name = "typer", specifier = ">=0.12" },
     { name = "types-regex", marker = "extra == 'dev'" },
     { name = "types-tqdm", marker = "extra == 'dev'" },
 ]
-provides-extras = ["afrolid", "llm", "cld3", "leaderboard", "dev", "notebooks", "all"]
+provides-extras = ["afrolid", "llm", "cld3", "commonlingua", "leaderboard", "dev", "notebooks", "all"]
 
 [[package]]
 name = "contourpy"

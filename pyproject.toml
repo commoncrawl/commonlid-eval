@@ -59,6 +59,11 @@ llm = [
     "botocore>=1.35",
 ]
 cld3 = ["cld3-py>=3.1"]
+commonlingua = [
+    # CommonLingua is a 2.35M-param byte-level model; needs torch but not the
+    # transformers stack that [afrolid] pulls in.
+    "torch>=2.4",
+]
 leaderboard = [
     # gradio 4.x imports HfFolder from huggingface_hub, which was removed in
     # huggingface-hub 1.0; gradio 5 dropped that import.
@@ -88,7 +93,7 @@ notebooks = [
     "nbclient>=0.10",
 ]
 all = [
-    "commonlid[afrolid,llm]",
+    "commonlid[afrolid,llm,commonlingua]",
 ]
 
 [project.scripts]
@@ -208,6 +213,8 @@ omit = [
     # afrolid needs the heavy `[afrolid]` extra (torch + transformers); not
     # installed in dev and so exercised only via mocked unit tests.
     "src/commonlid/models/afrolid.py",
+    # commonlingua needs the `[commonlingua]` extra (torch); same precedent.
+    "src/commonlid/models/commonlingua.py",
 ]
 
 [tool.coverage.report]

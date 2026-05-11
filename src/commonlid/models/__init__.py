@@ -11,6 +11,7 @@ directly if you want to evaluate an LLM.
 from commonlid.models import afrolid as _afrolid  # noqa: F401
 from commonlid.models import cld2 as _cld2  # noqa: F401
 from commonlid.models import cld3 as _cld3  # noqa: F401
+from commonlid.models import commonlingua as _commonlingua  # noqa: F401
 from commonlid.models import fasttext_ft as _fasttext_ft  # noqa: F401
 from commonlid.models import funlangid as _funlangid  # noqa: F401
 from commonlid.models import glotlid as _glotlid  # noqa: F401
