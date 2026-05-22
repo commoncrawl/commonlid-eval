@@ -39,6 +39,7 @@ From PyPI:
 pip install commonlid                      # core deps + classical LID models
 pip install "commonlid[llm]"               # + DSPy-based LLM evaluation
 pip install "commonlid[afrolid]"           # + torch/transformers for AfroLID
+pip install "commonlid[commonlingua]"      # + torch for the CommonLingua byte-level model
 pip install "commonlid[notebooks]"         # + jupyterlab + matplotlib for paper_tables.ipynb
 pip install "commonlid[all]"               # everything runtime-facing
 ```
@@ -192,7 +193,7 @@ from commonlid import list_models, list_datasets
 
 assert list_models() == [
     "AfroLID", "GlotLID", "OpenLID-v2", "cld2", "cld3",
-    "fasttext", "funlangid", "pyfranc",
+    "commonlingua", "fasttext", "funlangid", "pyfranc",
 ]
 assert list_datasets() == [
     "bibles_300", "bibles_300_nano",
@@ -298,6 +299,7 @@ for line in preds_path.read_text().splitlines():
 | `fasttext` | [facebook/fasttext-language-identification](https://huggingface.co/facebook/fasttext-language-identification) | fasttext |
 | `pyfranc` | [pyfranc](https://pypi.org/project/pyfranc/) | Pure Python |
 | `AfroLID` | [UBC-NLP/afrolid_1.5](https://huggingface.co/UBC-NLP/afrolid_1.5) | Requires `[afrolid]` extra |
+| `commonlingua` | [PleIAs/CommonLingua](https://huggingface.co/PleIAs/CommonLingua) | 2.35M-param byte-level model, 334 languages; requires `[commonlingua]` extra |
 | `funlangid` | Vendored in `src/commonlid/vendor/fun_langid.py` | Simple char-4gram baseline |
 
 LLM models are instantiated dynamically (`DSPyLLMModel`) and not

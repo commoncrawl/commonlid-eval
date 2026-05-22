@@ -20,6 +20,7 @@ EXPECTED_MODEL_IDS = {
     "OpenLID-v2",
     "cld2",
     "cld3",
+    "commonlingua",
     "fasttext",
     "funlangid",
     "pyfranc",
