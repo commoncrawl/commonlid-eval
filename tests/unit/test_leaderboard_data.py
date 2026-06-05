@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 pd = pytest.importorskip("pandas")
+
+
+_UNSET = object()
 
 
 def _write_summary(
@@ -17,12 +21,14 @@ def _write_summary(
     *,
     macro_f1: float = 0.5,
     fpr_per_lang: dict[str, float | None] | None = None,
+    per_language: dict[str, dict[str, Any]] | None = None,
+    supported_languages: object = _UNSET,
 ) -> None:
     out = root / dataset_id / model_id
     out.mkdir(parents=True, exist_ok=True)
     fpr_per_lang = fpr_per_lang or {"eng": 0.01, "deu": 0.02}
-    summary = {
-        "schema_version": 2,
+    summary: dict[str, Any] = {
+        "schema_version": 3,
         "model_id": model_id,
         "dataset_id": dataset_id,
         "dataset_revision": "abc123",
@@ -54,7 +60,8 @@ def _write_summary(
             "n_correct_observed": 65,
             "n_predictions_observed": 95,
         },
-        "per_language": {
+        "per_language": per_language
+        or {
             lang: {
                 "f1": 0.5,
                 "precision": 0.5,
@@ -68,6 +75,8 @@ def _write_summary(
         },
         "extra": {},
     }
+    if supported_languages is not _UNSET:
+        summary["supported_languages"] = supported_languages
     (out / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
 
 
@@ -312,3 +321,173 @@ def test_format_table_pads_zero_values_with_decimals(tmp_path: Path) -> None:
     row = _format_table(df).iloc[0]
     assert row["Macro F1"] == "0.0"
     assert row["Mean FPR (%)"] == "0.00"
+
+
+# ----- (cov.) variant ---------------------------------------------------------
+
+
+def _per_language_block(
+    spec: dict[str, tuple[int, int, int, float]],
+) -> dict[str, dict[str, Any]]:
+    """Build a per_language dict from a compact (gt, pred, correct, fpr) spec."""
+    return {
+        lang: {
+            "gt_count": gt,
+            "predictions": pred,
+            "correct": correct,
+            "precision": (correct / pred) if pred else 0.0,
+            "recall": (correct / gt) if gt else 0.0,
+            "f1": (
+                2 * (correct / pred) * (correct / gt) / ((correct / pred) + (correct / gt))
+                if pred and gt and correct
+                else 0.0
+            ),
+            "fpr": fpr,
+        }
+        for lang, (gt, pred, correct, fpr) in spec.items()
+    }
+
+
+def test_row_cov_fields_filter_to_supported_languages(tmp_path: Path) -> None:
+    """With supported={eng,fra}, cov metrics exclude deu (an unsupported gold lang)."""
+    from commonlid.leaderboard.data import load_results
+
+    per_lang = _per_language_block({
+        "eng": (10, 10, 10, 0.01),  # perfect
+        "fra": (10, 10, 5, 0.02),  # P=0.5 R=0.5 F1=0.5
+        "deu": (10, 10, 0, 0.03),  # zero (excluded from cov)
+    })
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        "M",
+        per_language=per_lang,
+        supported_languages=["eng", "fra"],
+    )
+    df = load_results(local_dir=tmp_path)
+    row = df.iloc[0]
+    # Macro F1 cov = mean(F1 over {eng, fra}) = (1.0 + 0.5) / 2 = 0.75; "all" includes deu and drops.
+    assert row["macro_f1_cov"] == pytest.approx(0.75)
+    assert row["macro_f1_cov"] > row["macro_f1"]
+    # Micro F1 cov pools eng+fra: P = 15/20 = 0.75, R = 15/20 = 0.75, F1 = 0.75.
+    assert row["micro_f1_cov"] == pytest.approx(0.75)
+    # n_languages_cov is the supported-and-have-gold intersection size.
+    assert row["n_languages_cov"] == 2
+    # supported_languages round-trips as a sorted list.
+    assert row["supported_languages"] == ["eng", "fra"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "supported"),
+    [
+        ("missing", _UNSET),  # legacy file, no key
+        ("null", None),  # LLM row, undefined support set
+        ("empty_list", []),  # degenerate "supports zero languages"
+    ],
+)
+def test_row_cov_fields_none_when_no_support_data(
+    tmp_path: Path, kind: str, supported: object
+) -> None:
+    from commonlid.leaderboard.data import load_results
+
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        f"M_{kind}",
+        supported_languages=supported,
+    )
+    df = load_results(local_dir=tmp_path)
+    row = df.iloc[0]
+    assert row["macro_f1_cov"] is None
+    assert row["macro_precision_cov"] is None
+    assert row["macro_recall_cov"] is None
+    assert row["micro_f1_cov"] is None
+    assert row["mean_fpr_cov"] is None
+    assert row["n_languages_cov"] is None
+    # supported_languages is preserved as-is in the row (None for both
+    # missing and null) so the UI can choose to show a tooltip later.
+    expected = None if supported is _UNSET or supported is None else supported
+    assert row["supported_languages"] == expected
+
+
+def test_row_cov_fields_none_when_supported_set_misses_all_gold(tmp_path: Path) -> None:
+    """If the model's support set has no overlap with the dataset's gold, cov collapses to None."""
+    from commonlid.leaderboard.data import load_results
+
+    per_lang = _per_language_block({"eng": (10, 10, 8, 0.01)})
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        "M",
+        per_language=per_lang,
+        supported_languages=["xyz", "qqq"],  # no overlap
+    )
+    df = load_results(local_dir=tmp_path)
+    row = df.iloc[0]
+    assert row["macro_f1_cov"] is None
+    assert row["n_languages_cov"] is None
+
+
+def test_format_table_cov_scope_renders_em_dashes(tmp_path: Path) -> None:
+    """Rows without ``supported_languages`` show em-dashes and sort to the bottom."""
+    pytest.importorskip("gradio")
+    from commonlid.leaderboard.app import _format_table
+    from commonlid.leaderboard.data import load_results
+
+    per_lang = _per_language_block({
+        "eng": (10, 10, 10, 0.01),
+        "fra": (10, 10, 5, 0.02),
+    })
+    # Model with a declared support set -> real cov numbers.
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        "WITH_SUPPORT",
+        per_language=per_lang,
+        supported_languages=["eng", "fra"],
+    )
+    # LLM-style row -> JSON null -> em-dashes in cov view.
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        "NO_SUPPORT",
+        per_language=per_lang,
+        supported_languages=None,
+    )
+    df = load_results(local_dir=tmp_path)
+    cov_table = _format_table(df, scope="cov")
+    # Real-cov row should sort above the em-dash row.
+    assert list(cov_table["Model"]) == ["WITH_SUPPORT", "NO_SUPPORT"]
+    assert cov_table.iloc[0]["Macro F1"] == "75.0"
+    assert cov_table.iloc[1]["Macro F1"] == "—"
+    assert cov_table.iloc[1]["Languages"] == "—"
+    # Samples/s is unaffected by the toggle (it's a model property).
+    assert cov_table.iloc[0]["Samples/s"] == "1234.5"
+    assert cov_table.iloc[1]["Samples/s"] == "1234.5"
+
+
+def test_scope_radio_change_swaps_table_and_legend(tmp_path: Path) -> None:
+    """The scope-change handler returns a fresh styled table + legend Markdown."""
+    pytest.importorskip("gradio")
+    from commonlid.leaderboard.app import (
+        _HEADLINE_COLUMN_HELP_COV,
+        _columns_help_markdown,
+        _make_scope_handler,
+    )
+    from commonlid.leaderboard.data import load_results
+
+    per_lang = _per_language_block({"eng": (10, 10, 10, 0.01), "fra": (10, 10, 5, 0.02)})
+    _write_summary(
+        tmp_path,
+        "commonlid",
+        "M",
+        per_language=per_lang,
+        supported_languages=["eng", "fra"],
+    )
+    df = load_results(local_dir=tmp_path)
+    handler = _make_scope_handler(df)
+    table_payload, legend = handler("cov")
+    assert legend == _columns_help_markdown(_HEADLINE_COLUMN_HELP_COV)
+    assert table_payload["headers"][1] == "Macro F1"
+    # Row data is the cov computation, not the "all" one.
+    assert table_payload["data"][0][1] == "75.0"

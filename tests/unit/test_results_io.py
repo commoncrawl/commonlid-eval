@@ -61,3 +61,33 @@ def test_write_predictions_roundtrip(tmp_path) -> None:
     write_predictions(rows, path)
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     assert lines == rows
+
+
+def test_summary_supported_languages_roundtrips_list() -> None:
+    """A declared support set ships through ``summary()`` as the sorted list."""
+    r = _result()
+    r.supported_languages = ["eng", "fra"]
+    assert _result().summary()["supported_languages"] is None  # default still None
+    assert r.summary()["supported_languages"] == ["eng", "fra"]
+
+
+def test_summary_supported_languages_roundtrips_none(tmp_path) -> None:
+    """``None`` means *undefined* (e.g. LLM rows) and must serialize as JSON ``null``.
+
+    Round-trip via write_summary -> load_summary guards against an accidental
+    coercion to ``[]``, which has a distinct semantic meaning (a model that
+    declared zero supported languages).
+    """
+    path = tmp_path / "sum.json"
+    write_summary(_result(), path)
+    raw = path.read_text(encoding="utf-8")
+    # Verify JSON literal -- ``[]`` would be a wrong but type-compatible answer.
+    assert '"supported_languages": null' in raw
+    assert load_summary(path)["supported_languages"] is None
+
+
+def test_summary_supported_languages_preserves_empty_list() -> None:
+    """``[]`` is degenerate but real -- distinct from ``None``."""
+    r = _result()
+    r.supported_languages = []
+    assert r.summary()["supported_languages"] == []

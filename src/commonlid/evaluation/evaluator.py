@@ -159,6 +159,21 @@ class Evaluator:
         )
         n_with_gold = sum(1 for g in ytrue if g is not None)
         samples_per_second = (len(ytrue) / elapsed) if elapsed > 0 else 0.0
+        # `None` here is meaningful: it tells downstream consumers that the
+        # model's support set is undefined (e.g. LLMs), distinct from a model
+        # that declared an empty set. Errors during discovery downgrade to
+        # the same "unknown" sentinel rather than crashing the run.
+        try:
+            supported = model.discover_supported_languages()
+        except Exception as exc:
+            logger.warning(
+                "%s   discover_supported_languages() raised %s: %s -- recording as None",
+                prefix,
+                type(exc).__name__,
+                exc,
+            )
+            supported = None
+        supported_languages = sorted(supported) if supported is not None else None
         result = Result(
             model_id=model.model_id,
             dataset_id=dataset.dataset_id,
@@ -170,6 +185,7 @@ class Evaluator:
             limit=self.config.limit,
             timestamp=datetime.now(timezone.utc).isoformat(),
             commonlid_version=__version__,
+            supported_languages=supported_languages,
         )
 
         run_dir = self.config.output_dir / dataset.dataset_id / model.model_id

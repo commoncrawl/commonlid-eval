@@ -13,12 +13,20 @@ from typing import Any
 from commonlid.metrics.aggregate import macro_average, micro_average
 from commonlid.metrics.core import LanguageMetrics
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(slots=True)
 class Result:
-    """Aggregate outcome of one model evaluated on one dataset."""
+    """Aggregate outcome of one model evaluated on one dataset.
+
+    ``supported_languages`` follows a tri-state convention shared with
+    :meth:`LIDModel.discover_supported_languages`: ``None`` means the
+    model's support set is undefined (e.g. LLM-based models that can be
+    prompted for any language), a list of ISO 639-3 codes is the closed
+    set the model declares, and an empty list is the degenerate "supports
+    zero languages" case. The leaderboard's ``(cov.)`` view consumes this.
+    """
 
     model_id: str
     dataset_id: str
@@ -32,6 +40,7 @@ class Result:
     commonlid_version: str = ""
     python_version: str = field(default_factory=lambda: sys.version.split()[0])
     platform: str = field(default_factory=platform.platform)
+    supported_languages: list[str] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
@@ -52,6 +61,7 @@ class Result:
             "macro": macro_average(self.per_language),
             "micro": micro_average(self.per_language),
             "per_language": {lang: asdict(m) for lang, m in sorted(self.per_language.items())},
+            "supported_languages": self.supported_languages,
             "extra": self.extra,
         }
 
