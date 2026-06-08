@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "commonlid"
-version = "0.2.2"
+version = "0.2.3"
 description = "Evaluate language identification models on CommonLID and other benchmarks."
 readme = "README.md"
 license = { file = "LICENSE" }
