@@ -410,26 +410,25 @@ def _make_select_handler(
 ) -> Any:
     """Build the row-select callback as a closure over the captured state.
 
-    The callback looks up the clicked row in the *current* table value
-    (passed in via Gradio's event arg) so that switching the scope radio
-    and then clicking a row drills down the row at its post-toggle
-    position, not the row that would have been there before the swap.
+    Uses ``gr.SelectData.row_value`` (Gradio's per-click payload that
+    contains the clicked row as a 1-D list) so the drilldown picks up the
+    *current* table ordering — switching the scope radio and then clicking
+    a row resolves to the row at its post-toggle position. Passing the
+    Dataframe component as an event input would not work: Gradio 6
+    preprocesses Dataframe inputs into ``pandas.DataFrame`` objects, not
+    the ``{"data", "headers"}`` dict we feed in via ``_styled_value``.
 
     Gradio inspects ``__defaults__`` when registering events, and comparing a
     DataFrame default against a type annotation hits an unimplemented arrow
     dtype path. A closure keeps the state out of the function signature.
     """
 
-    def _on_select(table_value: Any, evt: gr.SelectData) -> tuple[str, Any]:
-        if evt.index is None:
+    def _on_select(evt: gr.SelectData) -> tuple[str, Any]:
+        if evt.index is None or not evt.row_value:
             return ("_Click a row to load per-language metrics._", None)
-        row_idx = evt.index[0] if isinstance(evt.index, list | tuple) else evt.index
         try:
-            data = table_value.get("data") if isinstance(table_value, dict) else None
-            if data is None:
-                return ("_Click a row to load per-language metrics._", None)
-            model_id = data[row_idx][0]
-        except (IndexError, KeyError, TypeError):
+            model_id = evt.row_value[0]
+        except (IndexError, TypeError):
             return ("_Could not resolve clicked row._", None)
         per_lang = _per_language_drilldown(snapshot_root, dataset_id, model_id)
         return (
@@ -540,7 +539,6 @@ def build_app(
                     )
                     leaderboard.select(
                         _make_select_handler(dataset_id, snapshot_root),
-                        inputs=[leaderboard],
                         outputs=[drilldown_label, drilldown],
                     )
         gr.Markdown(footer)

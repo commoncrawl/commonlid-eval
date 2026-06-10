@@ -1,4 +1,4 @@
-# The Space pulls the package from PyPI with the leaderboard extra so the
-# Gradio entrypoint and `commonlid leaderboard serve` CLI stay in sync. Pin a
-# concrete release here once we tag one (e.g. `commonlid[leaderboard]==0.1.0`).
-commonlid[leaderboard]
+# Install commonlid directly from GitHub main so the Space picks up changes
+# without a PyPI release cycle. Pin to a tag or commit SHA (e.g.
+# `...@v0.2.3` or `...@<sha>`) if you need to lock the Space to a known build.
+commonlid[leaderboard] @ git+https://github.com/commoncrawl/commonlid-eval.git@main
