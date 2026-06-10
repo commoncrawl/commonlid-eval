@@ -466,6 +466,51 @@ def test_format_table_cov_scope_renders_em_dashes(tmp_path: Path) -> None:
     assert cov_table.iloc[1]["Samples/s"] == "1234.5"
 
 
+def test_row_select_handler_loads_drilldown_from_row_value(tmp_path: Path) -> None:
+    """Clicking a row resolves model_id via ``evt.row_value[0]`` and renders the drilldown.
+
+    Regression: an earlier version pulled the model_id from the Dataframe
+    input, but Gradio 6 preprocesses Dataframe inputs into ``pandas.DataFrame``
+    objects rather than the ``{"data", "headers"}`` dict the app feeds in,
+    so the handler silently returned the "click a row" placeholder.
+    """
+    pytest.importorskip("gradio")
+    from types import SimpleNamespace
+
+    from commonlid.leaderboard.app import _make_select_handler
+
+    per_lang = _per_language_block({"eng": (10, 10, 8, 0.01), "fra": (10, 10, 4, 0.02)})
+    _write_summary(tmp_path, "commonlid", "GlotLID", per_language=per_lang)
+    handler = _make_select_handler("commonlid", tmp_path)
+
+    evt = SimpleNamespace(
+        index=(0, 0),
+        value="GlotLID",
+        row_value=["GlotLID", "80.0", "60.0", "0.10", "2", "1234.5"],
+    )
+    label, payload = handler(evt)
+    assert "GlotLID" in label
+    assert "commonlid" in label
+    assert payload is not None
+    headers = payload["headers"]
+    assert headers[:2] == ["Language", "F1"]
+    languages = [row[0] for row in payload["data"]]
+    assert set(languages) == {"eng", "fra"}
+
+
+def test_row_select_handler_returns_placeholder_when_index_missing(tmp_path: Path) -> None:
+    pytest.importorskip("gradio")
+    from types import SimpleNamespace
+
+    from commonlid.leaderboard.app import _make_select_handler
+
+    handler = _make_select_handler("commonlid", tmp_path)
+    evt = SimpleNamespace(index=None, value=None, row_value=None)
+    label, payload = handler(evt)
+    assert "Click a row" in label
+    assert payload is None
+
+
 def test_scope_radio_change_swaps_table_and_legend(tmp_path: Path) -> None:
     """The scope-change handler returns a fresh styled table + legend Markdown."""
     pytest.importorskip("gradio")
