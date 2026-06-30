@@ -430,6 +430,8 @@ exclude the `und` bucket by default (toggle with `include_und=True`).
 
 ## Adding a new model
 
+A guide for adding a new model can be found [here](docs/contributing/adding_a_model.md).
+
 <!-- readme-test: fast; id=add-model (registers into an isolated registry) -->
 ```python
 # src/commonlid/models/my_model.py
