@@ -42,6 +42,12 @@ BLOG_URL = (
 )
 PAPER_URL = "https://arxiv.org/abs/2601.18026"
 
+WEBSITE_URL = "https://commonlid.org/"
+
+NEW_MODEL_URL = (
+    "https://github.com/commoncrawl/commonlid-eval/blob/main/docs/contributing/adding_a_model.md"
+)
+
 Scope = Literal["all", "cov"]
 
 #: Radio choices shown above each dataset's results table.
@@ -480,7 +486,7 @@ def build_app(
         f"Headline metric: **macro F1**. Models are ranked by macro F1 "
         f"within each tab; click a row to see per-language metrics.\n"
         f"\n"
-        f"📝 [Blog post]({BLOG_URL})  •  📄 [Paper]({PAPER_URL})"
+        f"🌐 [Website]({WEBSITE_URL})  •  📝 [Blog post]({BLOG_URL})  •  📄 [Paper]({PAPER_URL})  •  🆕 [Add a model]({NEW_MODEL_URL})"
     )
     repo_url = f"https://huggingface.co/datasets/{repo_id}"
     if revision:
