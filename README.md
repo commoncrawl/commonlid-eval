@@ -58,6 +58,7 @@ git clone https://github.com/commoncrawl/commonlid-eval.git
 cd commonlid-eval
 make install                               # uv sync --extra dev
 make check                                 # ruff + mypy + pytest (matches CI)
+source .venv/bin/activate
 ```
 
 The `Makefile` wraps every common workflow (`make help` lists them) and
