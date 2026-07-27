@@ -179,6 +179,105 @@ def _resolve_model_spec(spec: str, llm_kwargs: dict[str, Any]) -> Any:
     return get_model(spec)
 
 
+@app.command("estimate-tokens")
+def estimate_tokens_cmd(
+    model: Annotated[
+        list[str],
+        typer.Option(
+            "--model",
+            "-m",
+            help="LLM model name or 'dspy:<name>' spec (e.g. 'dspy:openai/gpt-5'). Repeat to add more.",
+        ),
+    ],
+    dataset: Annotated[
+        list[str], typer.Option("--dataset", "-d", help="Dataset id (repeat to add more).")
+    ],
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            help="Measure only the first N samples (0 = full dataset). Projects to the full set when N < size.",
+        ),
+    ] = 0,
+    instruction: Annotated[
+        str | None,
+        typer.Option("--instruction", help="Override the DSPy system instruction used for estimation."),
+    ] = None,
+    output_tokens: Annotated[
+        int, typer.Option("--output-tokens", help="Assumed completion tokens per sample.")
+    ] = 10,
+    reasoning_tokens: Annotated[
+        int,
+        typer.Option(
+            "--reasoning-tokens",
+            help="Assumed reasoning tokens per sample (reasoning models); billed as completion tokens.",
+        ),
+    ] = 0,
+    as_json: Annotated[bool, typer.Option("--json", help="Output JSON instead of text.")] = False,
+) -> None:
+    """Estimate token usage and USD cost of an LLM run without making API calls.
+
+    Reconstructs the exact DSPy prompt per dataset sample and counts tokens with
+    the model's tokenizer (tiktoken for OpenAI/Azure, HF AutoTokenizer for HF
+    models); pricing comes from LiteLLM. Accounts for the system prompt and an
+    optional per-sample reasoning-token assumption.
+    """
+    from commonlid.evaluation import token_cost
+
+    instr = instruction if instruction is not None else token_cost.DEFAULT_INSTRUCTION
+    estimates: list[token_cost.TokenCostEstimate] = []
+    for dataset_id in dataset:
+        ds = get_dataset(dataset_id)
+        for model_name in model:
+            estimates.append(
+                token_cost.estimate(
+                    model_name,
+                    ds,
+                    instruction=instr,
+                    output_tokens=output_tokens,
+                    reasoning_tokens=reasoning_tokens,
+                    limit=limit,
+                )
+            )
+
+    if as_json:
+        typer.echo(json.dumps([e.to_dict() for e in estimates], indent=2))
+        return
+    for est in estimates:
+        _echo_estimate(est)
+
+
+def _fmt_usd(value: float | None) -> str:
+    return f"${value:,.4f}" if value is not None else "n/a (model not in LiteLLM price map)"
+
+
+def _echo_estimate(est: Any) -> None:
+    typer.echo(f"\n{est.model}  on  {est.dataset_id}")
+    typer.echo(f"  samples measured:        {est.n_samples:,} of {est.n_total:,}")
+    typer.echo(f"  per-request overhead:    {est.per_request_overhead_tokens:,} tokens (system prompt + scaffolding)")
+    typer.echo(
+        f"  input tokens:            {est.total_input_tokens:,} total "
+        f"({est.mean_input_tokens:,.1f} mean/sample)"
+    )
+    typer.echo(
+        f"  output tokens:           {est.total_output_tokens:,} total "
+        f"({est.output_tokens_per_sample} completion + {est.reasoning_tokens_per_sample} reasoning per sample)"
+    )
+    typer.echo(f"  input cost:              {_fmt_usd(est.input_cost_usd)}")
+    typer.echo(f"  output cost:             {_fmt_usd(est.output_cost_usd)}")
+    typer.echo(f"  total cost:              {_fmt_usd(est.total_cost_usd)}")
+    if est.extrapolated:
+        typer.echo(
+            f"  → projected full run:    {est.full_total_input_tokens:,} input + "
+            f"{est.full_total_output_tokens:,} output tokens, {_fmt_usd(est.full_total_cost_usd)} "
+            f"(extrapolated from {est.n_samples:,} samples)"
+        )
+    if est.reasoning_tokens_per_sample == 0:
+        typer.echo("  note: reasoning tokens assumed 0; set --reasoning-tokens for reasoning models (gpt-5/o-series).")
+    if est.tokenizer_note:
+        typer.echo(f"  note: {est.tokenizer_note}")
+
+
 @app.command()
 def predict(
     model: Annotated[str, typer.Option("--model", "-m", help="Model id.")],

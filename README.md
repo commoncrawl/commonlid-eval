@@ -142,6 +142,27 @@ The `--api-base`, `--api-version`, `--api-key`, `--azure-ad-token`,
 `--llm-n-threads` flags are only consumed by `dspy:` models and ignored
 when every model is a classical one.
 
+### Estimate tokens & cost before a run
+
+Running an LLM over a full benchmark can be expensive, so estimate the token
+usage and USD cost up front — offline, with no API calls:
+
+```bash
+commonlid estimate-tokens \
+  --model dspy:openai/gpt-5 \
+  --dataset commonlid \
+  --reasoning-tokens 300     # per-sample assumption for reasoning models
+```
+
+It reconstructs the exact DSPy prompt (system instruction + per-sample text)
+and counts tokens with the model's own tokenizer — `tiktoken` for OpenAI/Azure,
+a Hugging Face `AutoTokenizer` for `huggingface/…` models (install
+`transformers` for the latter) — and prices the result via LiteLLM's model map.
+Pass `--limit N` to measure a sample and project to the full dataset, or
+`--json` for machine-readable output. Reasoning-token usage can't be known
+before a run, so `--reasoning-tokens` is an explicit assumption billed as
+completion tokens; the default is `0` and the output states it.
+
 ## Python API
 
 The `commonlid` import auto-registers every shipped model and dataset, so
