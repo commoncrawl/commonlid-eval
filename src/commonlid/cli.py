@@ -201,7 +201,9 @@ def estimate_tokens_cmd(
     ] = 0,
     instruction: Annotated[
         str | None,
-        typer.Option("--instruction", help="Override the DSPy system instruction used for estimation."),
+        typer.Option(
+            "--instruction", help="Override the DSPy system instruction used for estimation."
+        ),
     ] = None,
     output_tokens: Annotated[
         int, typer.Option("--output-tokens", help="Assumed completion tokens per sample.")
@@ -254,7 +256,9 @@ def _fmt_usd(value: float | None) -> str:
 def _echo_estimate(est: Any) -> None:
     typer.echo(f"\n{est.model}  on  {est.dataset_id}")
     typer.echo(f"  samples measured:        {est.n_samples:,} of {est.n_total:,}")
-    typer.echo(f"  per-request overhead:    {est.per_request_overhead_tokens:,} tokens (system prompt + scaffolding)")
+    typer.echo(
+        f"  per-request overhead:    {est.per_request_overhead_tokens:,} tokens (system prompt + scaffolding)"
+    )
     typer.echo(
         f"  input tokens:            {est.total_input_tokens:,} total "
         f"({est.mean_input_tokens:,.1f} mean/sample)"
@@ -273,7 +277,9 @@ def _echo_estimate(est: Any) -> None:
             f"(extrapolated from {est.n_samples:,} samples)"
         )
     if est.reasoning_tokens_per_sample == 0:
-        typer.echo("  note: reasoning tokens assumed 0; set --reasoning-tokens for reasoning models (gpt-5/o-series).")
+        typer.echo(
+            "  note: reasoning tokens assumed 0; set --reasoning-tokens for reasoning models (gpt-5/o-series)."
+        )
     if est.tokenizer_note:
         typer.echo(f"  note: {est.tokenizer_note}")
 

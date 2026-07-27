@@ -67,7 +67,11 @@ class TokenCostEstimate:
 
 def _strip_spec_prefix(model_name: str) -> str:
     """Accept the same ``dspy:<name>`` spec the ``run`` command uses."""
-    return model_name.removeprefix(DSPY_SPEC_PREFIX) if model_name.startswith(DSPY_SPEC_PREFIX) else model_name
+    return (
+        model_name.removeprefix(DSPY_SPEC_PREFIX)
+        if model_name.startswith(DSPY_SPEC_PREFIX)
+        else model_name
+    )
 
 
 def _render_messages(instruction: str, text: str) -> list[dict[str, Any]]:
@@ -79,7 +83,9 @@ def _render_messages(instruction: str, text: str) -> list[dict[str, Any]]:
     return cast("list[dict[str, Any]]", messages)
 
 
-def _count_tokens(model: str, *, text: str | None = None, messages: list[dict[str, Any]] | None = None) -> int | None:
+def _count_tokens(
+    model: str, *, text: str | None = None, messages: list[dict[str, Any]] | None = None
+) -> int | None:
     """Count tokens via LiteLLM. Returns ``None`` if no tokenizer resolves."""
     import litellm
 
@@ -120,7 +126,9 @@ def estimate(
             f"(~{_HEURISTIC_CHARS_PER_TOKEN} chars/token heuristic). "
             "Install `transformers` for accurate Hugging Face tokenization."
         )
-        overhead = len(_render_messages(instruction, "")[0]["content"]) // _HEURISTIC_CHARS_PER_TOKEN
+        overhead = (
+            len(_render_messages(instruction, "")[0]["content"]) // _HEURISTIC_CHARS_PER_TOKEN
+        )
 
     total_input_tokens = 0
     n_samples = 0

@@ -36,7 +36,9 @@ def _fake_token_counter(model: str = "", text=None, messages=None, **_kw) -> int
     return len(text or "")
 
 
-def _fake_cost_per_token(model: str = "", prompt_tokens: int = 0, completion_tokens: int = 0, **_kw):
+def _fake_cost_per_token(
+    model: str = "", prompt_tokens: int = 0, completion_tokens: int = 0, **_kw
+):
     return prompt_tokens * _IN_RATE, completion_tokens * _OUT_RATE
 
 
@@ -48,7 +50,9 @@ def priced(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_input_output_token_arithmetic(priced: None) -> None:
     texts = ["abc", "hello world"]  # lengths 3, 11
-    est = token_cost.estimate("openai/gpt-5", StubDataset(texts), output_tokens=5, reasoning_tokens=0)
+    est = token_cost.estimate(
+        "openai/gpt-5", StubDataset(texts), output_tokens=5, reasoning_tokens=0
+    )
 
     assert est.n_samples == 2
     assert est.per_request_overhead_tokens == _OVERHEAD
@@ -61,7 +65,9 @@ def test_input_output_token_arithmetic(priced: None) -> None:
 
 def test_reasoning_tokens_roll_into_output(priced: None) -> None:
     texts = ["a", "b", "c"]
-    est = token_cost.estimate("openai/gpt-5", StubDataset(texts), output_tokens=10, reasoning_tokens=300)
+    est = token_cost.estimate(
+        "openai/gpt-5", StubDataset(texts), output_tokens=10, reasoning_tokens=300
+    )
 
     assert est.total_output_tokens == 3 * (10 + 300)
     assert est.output_cost_usd == pytest.approx(est.total_output_tokens * _OUT_RATE)
@@ -118,7 +124,9 @@ def test_missing_tokenizer_falls_back_with_note(monkeypatch: pytest.MonkeyPatch)
 
 def test_limit_triggers_full_dataset_extrapolation(priced: None) -> None:
     texts = [f"sample-{i}" for i in range(5)]  # each len 8
-    est = token_cost.estimate("openai/gpt-5", StubDataset(texts), output_tokens=4, reasoning_tokens=0, limit=2)
+    est = token_cost.estimate(
+        "openai/gpt-5", StubDataset(texts), output_tokens=4, reasoning_tokens=0, limit=2
+    )
 
     assert est.n_samples == 2
     assert est.n_total == 5
