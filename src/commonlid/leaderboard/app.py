@@ -212,44 +212,131 @@ def _columns_help_markdown(items: list[tuple[str, str]]) -> str:
     return "\n".join(f"- **{label}** — {desc}" for label, desc in items)
 
 
-def _styled_value(table: Any, right_align_after_col: int = 0) -> dict[str, Any]:
-    """Wrap a formatted DataFrame in the ``{"data", "headers", "metadata"}``
-    structure Gradio expects when you want per-cell ``<td>`` CSS.
+#: Per-column decimal precision for display rendering. Columns absent
+#: from this map (Model / Language) are rendered by ``str(value)``.
+#: Load-bearing: the underlying cell value stays numeric so TanStack's
+#: Dataframe sort picks its numeric compare path; the strings in
+#: ``metadata.display_value`` only affect what the user sees.
+_DISPLAY_DECIMALS: dict[str, int] = {
+    "Macro F1": 1,
+    "Micro F1": 1,
+    "Mean FPR (%)": 2,
+    "Languages": 0,
+    "Samples/s": 1,
+    "F1": 1,
+    "Precision": 1,
+    "Recall": 1,
+    "FPR (%)": 2,
+    "GT": 0,
+    "Predictions": 0,
+    "Correct": 0,
+}
+
+
+def _styled_value(
+    table: Any,
+    right_align_after_col: int = 0,
+    *,
+    display: list[list[str]] | None = None,
+) -> dict[str, Any]:
+    """Wrap a DataFrame in the ``{"data", "headers", "metadata"}`` structure
+    Gradio expects, keeping raw numeric ``data`` and shipping formatted
+    strings via ``metadata.display_value``.
 
     Every cell in column ``> right_align_after_col`` gets ``text-align:
-    right``; the first column (Model / Language) is left-aligned by
-    default. Documented at
-    https://www.gradio.app/guides/styling-the-gradio-dataframe.
+    right``; the first column (Model / Language) is left-aligned by default.
+
+    Passing ``display`` (a list-of-lists of formatted display strings shaped
+    like ``data``) is the mechanism that keeps the visible cell text as
+    fixed-decimal strings while the underlying cell values stay numeric so
+    TanStack Table's sort picks its numeric path. When ``display`` is
+    ``None`` the display defaults to ``str(value)`` per cell (used only by
+    the empty-drilldown seed).
+
+    Documented at
+    https://www.gradio.app/guides/styling-the-gradio-dataframe — and Gradio
+    6's Dataframe passes the metadata dict through verbatim to
+    ``DataframeData`` (see ``gradio/components/dataframe.py`` postprocess).
     """
     headers = list(table.columns)
-    data = table.values.tolist()
+    # ``.values.tolist()`` can leak pandas NA sentinels from nullable dtypes
+    # (Float64/Int64) that don't serialise via json.dumps and confuse the
+    # frontend's numeric comparators. Normalise every null-ish scalar to
+    # Python ``None`` before it leaves this boundary.
+    raw = table.values.tolist()
+    data = [[None if _is_nullish(v) else v for v in row] for row in raw]
     styling = [
         ["text-align: right" if col > right_align_after_col else "" for col in range(len(headers))]
         for _ in range(len(data))
     ]
-    return {"data": data, "headers": headers, "metadata": {"styling": styling}}
+    if display is None:
+        display = [[_NA_DISPLAY if v is None else str(v) for v in row] for row in data]
+    return {
+        "data": data,
+        "headers": headers,
+        "metadata": {"styling": styling, "display_value": display},
+    }
+
+
+def _is_nullish(value: Any) -> bool:
+    """True for ``None``, ``float('nan')``, and pandas ``NA`` (from nullable dtypes)."""
+    import pandas as pd
+
+    if value is None:
+        return True
+    try:
+        # ``pd.isna`` handles NaN, pd.NA, NaT — but raises on non-scalars.
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _fmt(value: Any, decimals: int, *, scale: float = 1.0) -> str:
-    """Format a numeric value with ``decimals`` precision, em-dash for ``None``/``NaN``."""
-    import pandas as pd
-
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    """Format a numeric value with ``decimals`` precision, em-dash for null-ish values."""
+    if _is_nullish(value):
         return _NA_DISPLAY
     return f"{float(value) * scale:.{decimals}f}"
 
 
+def _display_matrix(table: Any) -> list[list[str]]:
+    """Build the ``metadata.display_value`` matrix for a formatted table.
+
+    Each column is looked up in :data:`_DISPLAY_DECIMALS` for its decimal
+    precision; unknown columns (Model / Language) pass through as
+    ``str(value)``. ``None`` / ``NaN`` renders as an em-dash regardless of
+    column, so cov-view "no data" cells look right without a second
+    lookup path.
+    """
+    headers = list(table.columns)
+    decimals_by_col: list[int | None] = [_DISPLAY_DECIMALS.get(h) for h in headers]
+    rows: list[list[str]] = []
+    for row in table.values.tolist():
+        rendered: list[str] = []
+        for value, decimals in zip(row, decimals_by_col, strict=True):
+            if decimals is None:
+                rendered.append(_NA_DISPLAY if value is None else str(value))
+            else:
+                rendered.append(_fmt(value, decimals))
+        rows.append(rendered)
+    return rows
+
+
 def _format_table(df: Any, scope: Scope = "all") -> Any:
-    """Project + format a results DataFrame for one Gradio tab.
+    """Project a results DataFrame down to the headline columns for one tab.
 
-    Numeric columns are converted to **fixed-decimal strings** (e.g. ``0.00``
-    not ``0``) so the rendered cells line up vertically; sort ordering is
-    preserved by sorting on the raw float *before* formatting.
+    Numeric columns stay **numeric** (``float`` / ``int`` / ``None``) so
+    the Dataframe frontend's click-sort compares magnitudes rather than
+    lexicographic char codes. The visible cell strings (fixed-decimal
+    formatting) are produced later by :func:`_display_matrix` and shipped
+    through ``metadata.display_value``.
 
-    - Macro F1 / Micro F1 / Samples/s use **1 decimal**.
-    - Mean FPR (%) uses **2 decimals**.
-    - In ``scope="cov"``, rows without ``supported_languages`` data render
-      em-dashes for every cov metric and sort to the bottom.
+    Macro / Micro / Mean-FPR raw fields live on a 0-1 scale; they are
+    scaled to percent here so the numeric cell values match the rendered
+    strings (``79.3`` on screen means ``79.3`` under the hood).
+
+    In ``scope="cov"``, rows without ``supported_languages`` data have
+    ``None`` in every cov metric — ``sort_values(..., na_position="last")``
+    sinks them to the bottom of the default sort.
     """
     import pandas as pd
 
@@ -259,51 +346,53 @@ def _format_table(df: Any, scope: Scope = "all") -> Any:
         return pd.DataFrame(columns=display_labels)
 
     out = df.copy()
-    source = {key: key for key, _ in columns}
-    sort_key = source["macro_f1_cov"] if scope == "cov" else source["macro_f1"]
-    # ``na_position="last"`` sinks rows without cov data to the bottom of
-    # the (cov.) view; the "all" view has no NaNs in this column.
+    sort_key = "macro_f1_cov" if scope == "cov" else "macro_f1"
     out = out.sort_values(sort_key, ascending=False, kind="stable", na_position="last")
     out = out.reset_index(drop=True)
 
-    macro_key = source["macro_f1_cov"] if scope == "cov" else source["macro_f1"]
-    micro_key = source["micro_f1_cov"] if scope == "cov" else source["micro_f1"]
-    fpr_key = source["mean_fpr_cov"] if scope == "cov" else source["mean_fpr"]
-    langs_key = source["n_languages_cov"] if scope == "cov" else source["n_languages"]
+    macro_key = "macro_f1_cov" if scope == "cov" else "macro_f1"
+    micro_key = "micro_f1_cov" if scope == "cov" else "micro_f1"
+    fpr_key = "mean_fpr_cov" if scope == "cov" else "mean_fpr"
 
-    out[macro_key] = out[macro_key].map(lambda x: _fmt(x, 1, scale=100))
-    out[micro_key] = out[micro_key].map(lambda x: _fmt(x, 1, scale=100))
-    out[fpr_key] = out[fpr_key].map(lambda x: _fmt(x, 2, scale=100))
-    out[langs_key] = out[langs_key].map(lambda x: _fmt(x, 0))
-    out["samples_per_second"] = out["samples_per_second"].map(lambda x: _fmt(x, 1))
+    # Scale 0-1 metrics to percent so the numeric value seen by the sort
+    # matches the string the user reads. ``* 100`` on a NaN stays NaN, so
+    # missing cov cells remain None/NaN for the na_position sink to catch.
+    out[macro_key] = out[macro_key].astype("Float64") * 100
+    out[micro_key] = out[micro_key].astype("Float64") * 100
+    out[fpr_key] = out[fpr_key].astype("Float64") * 100
 
     out = out[[k for k, _ in columns]]
     out.columns = display_labels
     return out
 
 
+_DRILLDOWN_HEADERS: list[str] = [
+    "Language",
+    "F1",
+    "Precision",
+    "Recall",
+    "FPR (%)",
+    "GT",
+    "Predictions",
+    "Correct",
+]
+
+
 def _per_language_drilldown(snapshot_root: Path, dataset_id: str, model_id: str) -> Any:
-    """Return a sorted (asc by F1) per-language metrics DataFrame for a (model, dataset)."""
+    """Return a numeric per-language metrics DataFrame for a (model, dataset), sorted by F1 desc.
+
+    Same principle as :func:`_format_table`: numeric columns stay numeric
+    so the Dataframe's click-sort compares magnitudes. The display strings
+    (1-decimal F1/Precision/Recall, 2-decimal FPR (%)) are produced via
+    :func:`_display_matrix` and shipped through ``metadata.display_value``.
+    """
     import pandas as pd
 
     summary_path = snapshot_root / dataset_id / model_id / SUMMARY_FILENAME
     if not summary_path.is_file():
-        return pd.DataFrame(
-            columns=[
-                "Language",
-                "F1",
-                "Precision",
-                "Recall",
-                "FPR (%)",
-                "GT",
-                "Predictions",
-                "Correct",
-            ]
-        )
+        return pd.DataFrame(columns=_DRILLDOWN_HEADERS)
     with summary_path.open(encoding="utf-8") as f:
         summary = json.load(f)
-    # Keep raw floats around for sorting; format to fixed-decimal strings
-    # afterwards so the rendered cells line up vertically.
     rows = []
     for lang, m in summary.get("per_language", {}).items():
         rows.append({
@@ -312,29 +401,14 @@ def _per_language_drilldown(snapshot_root: Path, dataset_id: str, model_id: str)
             "Precision": (m.get("precision") or 0.0) * 100,
             "Recall": (m.get("recall") or 0.0) * 100,
             "FPR (%)": (m.get("fpr") or 0.0) * 100,
-            "GT": m.get("gt_count", 0),
-            "Predictions": m.get("predictions", 0),
-            "Correct": m.get("correct", 0),
+            "GT": int(m.get("gt_count", 0)),
+            "Predictions": int(m.get("predictions", 0)),
+            "Correct": int(m.get("correct", 0)),
         })
     if not rows:
-        return pd.DataFrame(
-            columns=[
-                "Language",
-                "F1",
-                "Precision",
-                "Recall",
-                "FPR (%)",
-                "GT",
-                "Predictions",
-                "Correct",
-            ]
-        )
+        return pd.DataFrame(columns=_DRILLDOWN_HEADERS)
     df = pd.DataFrame.from_records(rows)
     df = df.sort_values("F1", ascending=False, kind="stable").reset_index(drop=True)
-    df["F1"] = df["F1"].map(lambda x: f"{x:.1f}")
-    df["Precision"] = df["Precision"].map(lambda x: f"{x:.1f}")
-    df["Recall"] = df["Recall"].map(lambda x: f"{x:.1f}")
-    df["FPR (%)"] = df["FPR (%)"].map(lambda x: f"{x:.2f}")
     return df
 
 
@@ -439,7 +513,7 @@ def _make_select_handler(
         per_lang = _per_language_drilldown(snapshot_root, dataset_id, model_id)
         return (
             f"### Per-language detail — `{model_id}` on `{dataset_id}`",
-            _styled_value(per_lang),
+            _styled_value(per_lang, display=_display_matrix(per_lang)),
         )
 
     return _on_select
@@ -450,8 +524,9 @@ def _make_scope_handler(sub_df: Any) -> Any:
 
     def _on_change(scope: Scope) -> tuple[Any, str]:
         help_items = _HEADLINE_COLUMN_HELP_COV if scope == "cov" else _HEADLINE_COLUMN_HELP
+        table = _format_table(sub_df, scope=scope)
         return (
-            _styled_value(_format_table(sub_df, scope=scope)),
+            _styled_value(table, display=_display_matrix(table)),
             _columns_help_markdown(help_items),
         )
 
@@ -518,7 +593,7 @@ def build_app(
                         interactive=True,
                     )
                     leaderboard = gr.Dataframe(
-                        value=_styled_value(table),
+                        value=_styled_value(table, display=_display_matrix(table)),
                         datatype=_HEADLINE_DATATYPES,
                         interactive=False,
                         wrap=True,
@@ -529,8 +604,11 @@ def build_app(
                     drilldown_label = gr.Markdown("_Click a row to load per-language metrics._")
                     # Seed the drilldown grid with an empty DataFrame so the Component
                     # has stable column headers before the first row click.
+                    drilldown_seed = _per_language_drilldown(snapshot_root, "", "")
                     drilldown = gr.Dataframe(
-                        value=_styled_value(_per_language_drilldown(snapshot_root, "", "")),
+                        value=_styled_value(
+                            drilldown_seed, display=_display_matrix(drilldown_seed)
+                        ),
                         datatype=_DRILLDOWN_DATATYPES,
                         interactive=False,
                         wrap=True,

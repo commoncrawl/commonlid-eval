@@ -249,18 +249,19 @@ def test_format_table_sorts_by_macro_f1_desc(tmp_path: Path) -> None:
     df = load_results(local_dir=tmp_path)
     table = _format_table(df)
     assert list(table["Model"]) == ["BBB", "CCC", "AAA"]
-    # Numeric values are rendered as fixed-decimal strings for consistent
-    # alignment (``0.0`` vs ``0`` etc.). Sort order still reflects raw floats.
-    assert list(table["Macro F1"]) == ["90.0", "60.0", "30.0"]
+    # Numeric values stay numeric (scaled to percent) so the Dataframe's
+    # click-sort compares magnitudes, not char codes. Display strings are
+    # produced separately by ``_display_matrix`` for ``metadata.display_value``.
+    assert [float(v) for v in table["Macro F1"]] == [90.0, 60.0, 30.0]
     # Sample / version columns were dropped from the headline table.
     assert "Samples" not in table.columns
     assert "Version" not in table.columns
 
 
 def test_format_table_rounds_to_one_decimal_except_fpr(tmp_path: Path) -> None:
-    """Macro/Micro/Samples-per-second round to 1 decimal, FPR rounds to 2."""
+    """``_display_matrix`` renders macro/micro/samples-per-second at 1 decimal, FPR at 2."""
     pytest.importorskip("gradio")
-    from commonlid.leaderboard.app import _format_table
+    from commonlid.leaderboard.app import _display_matrix, _format_table
     from commonlid.leaderboard.data import load_results
 
     _write_summary(
@@ -272,15 +273,20 @@ def test_format_table_rounds_to_one_decimal_except_fpr(tmp_path: Path) -> None:
     )
     df = load_results(local_dir=tmp_path)
     table = _format_table(df)
-    row = table.iloc[0]
-    # Macro/Micro: 1 decimal, expressed as percentages, formatted as strings.
-    assert row["Macro F1"] == "12.3"
-    # Mean FPR: 2 decimals.
-    assert row["Mean FPR (%)"] == "12.35"
+    # Raw table keeps full-precision numeric percent values.
+    assert float(table.iloc[0]["Macro F1"]) == pytest.approx(12.3456, rel=1e-4)
+    assert float(table.iloc[0]["Mean FPR (%)"]) == pytest.approx(12.3456, rel=1e-4)
+
+    display = _display_matrix(table)
+    headers = list(table.columns)
+    macro_col = headers.index("Macro F1")
+    fpr_col = headers.index("Mean FPR (%)")
+    assert display[0][macro_col] == "12.3"
+    assert display[0][fpr_col] == "12.35"
 
 
 def test_styled_value_right_aligns_non_first_columns() -> None:
-    """``_styled_value`` emits per-cell CSS that right-aligns numeric columns."""
+    """``_styled_value`` emits per-cell CSS + display_value; raw numeric data survives."""
     pytest.importorskip("gradio")
     import pandas as pd
 
@@ -288,26 +294,63 @@ def test_styled_value_right_aligns_non_first_columns() -> None:
 
     df = pd.DataFrame(
         [
-            ["GlotLID", "90.0", "0.05"],
-            ["cld2", "45.0", "0.10"],
+            ["GlotLID", 90.0, 0.05],
+            ["cld2", 45.0, 0.10],
         ],
         columns=["Model", "Macro F1", "Mean FPR (%)"],
     )
+    display = [
+        ["GlotLID", "90.0", "0.05"],
+        ["cld2", "45.0", "0.10"],
+    ]
 
-    out = _styled_value(df)
+    out = _styled_value(df, display=display)
     assert out["headers"] == ["Model", "Macro F1", "Mean FPR (%)"]
-    assert out["data"][0] == ["GlotLID", "90.0", "0.05"]
+    # Data stays numeric so the Dataframe's TanStack sort picks its numeric path.
+    assert out["data"][0] == ["GlotLID", 90.0, 0.05]
     styling = out["metadata"]["styling"]
-    assert len(styling) == 2  # one row per data row
-    # First column (Model) is left-aligned (empty string); others are right.
+    assert len(styling) == 2
     assert styling[0] == ["", "text-align: right", "text-align: right"]
     assert styling[1] == ["", "text-align: right", "text-align: right"]
+    # Formatted strings live in display_value, not in data.
+    assert out["metadata"]["display_value"] == display
+
+
+def test_styled_value_keeps_numeric_data_for_sort(tmp_path: Path) -> None:
+    """Regression: every non-Model cell in ``data`` is numeric or ``None``.
+
+    This is the load-bearing invariant that keeps TanStack Table on its
+    numeric sort path. If any cell here becomes a string, the Dataframe's
+    click-sort falls back to lexical string compare and orders ``"79.3"``
+    before ``"8.5"``.
+    """
+    pytest.importorskip("gradio")
+    import numbers
+
+    from commonlid.leaderboard.app import (
+        _display_matrix,
+        _format_table,
+        _styled_value,
+    )
+    from commonlid.leaderboard.data import load_results
+
+    _write_summary(tmp_path, "commonlid", "GlotLID", macro_f1=0.79)
+    _write_summary(tmp_path, "commonlid", "cld2", macro_f1=0.08)
+    df = load_results(local_dir=tmp_path)
+    table = _format_table(df)
+    sv = _styled_value(table, display=_display_matrix(table))
+    for row in sv["data"]:
+        # Column 0 is Model (str). Every other cell must be numeric or None.
+        for cell in row[1:]:
+            assert cell is None or isinstance(cell, numbers.Real), (
+                f"non-numeric cell in sort-column data: {cell!r} ({type(cell).__name__})"
+            )
 
 
 def test_format_table_pads_zero_values_with_decimals(tmp_path: Path) -> None:
-    """A 0.0 macro F1 must render as ``0.0`` (not ``0``); 0 FPR as ``0.00``."""
+    """A 0.0 macro F1 renders as ``0.0`` (not ``0``); 0 FPR as ``0.00`` — via display_value."""
     pytest.importorskip("gradio")
-    from commonlid.leaderboard.app import _format_table
+    from commonlid.leaderboard.app import _display_matrix, _format_table
     from commonlid.leaderboard.data import load_results
 
     _write_summary(
@@ -318,9 +361,13 @@ def test_format_table_pads_zero_values_with_decimals(tmp_path: Path) -> None:
         fpr_per_lang={"eng": 0.0, "deu": 0.0},
     )
     df = load_results(local_dir=tmp_path)
-    row = _format_table(df).iloc[0]
-    assert row["Macro F1"] == "0.0"
-    assert row["Mean FPR (%)"] == "0.00"
+    table = _format_table(df)
+    display = _display_matrix(table)
+    headers = list(table.columns)
+    macro_col = headers.index("Macro F1")
+    fpr_col = headers.index("Mean FPR (%)")
+    assert display[0][macro_col] == "0.0"
+    assert display[0][fpr_col] == "0.00"
 
 
 # ----- (cov.) variant ---------------------------------------------------------
@@ -455,15 +502,26 @@ def test_format_table_cov_scope_renders_em_dashes(tmp_path: Path) -> None:
         supported_languages=None,
     )
     df = load_results(local_dir=tmp_path)
+    from commonlid.leaderboard.app import _display_matrix
+
     cov_table = _format_table(df, scope="cov")
-    # Real-cov row should sort above the em-dash row.
+    # Real-cov row should sort above the em-dash row (na_position="last").
     assert list(cov_table["Model"]) == ["WITH_SUPPORT", "NO_SUPPORT"]
-    assert cov_table.iloc[0]["Macro F1"] == "75.0"
-    assert cov_table.iloc[1]["Macro F1"] == "—"
-    assert cov_table.iloc[1]["Languages"] == "—"
+    assert float(cov_table.iloc[0]["Macro F1"]) == pytest.approx(75.0, rel=1e-6)
+    assert cov_table.iloc[1]["Macro F1"] is None or pd.isna(cov_table.iloc[1]["Macro F1"])
+    assert cov_table.iloc[1]["Languages"] is None or pd.isna(cov_table.iloc[1]["Languages"])
+
+    display = _display_matrix(cov_table)
+    headers = list(cov_table.columns)
+    macro_col = headers.index("Macro F1")
+    langs_col = headers.index("Languages")
+    sps_col = headers.index("Samples/s")
+    assert display[0][macro_col] == "75.0"
+    assert display[1][macro_col] == "—"
+    assert display[1][langs_col] == "—"
     # Samples/s is unaffected by the toggle (it's a model property).
-    assert cov_table.iloc[0]["Samples/s"] == "1234.5"
-    assert cov_table.iloc[1]["Samples/s"] == "1234.5"
+    assert display[0][sps_col] == "1234.5"
+    assert display[1][sps_col] == "1234.5"
 
 
 def test_row_select_handler_loads_drilldown_from_row_value(tmp_path: Path) -> None:
@@ -534,5 +592,7 @@ def test_scope_radio_change_swaps_table_and_legend(tmp_path: Path) -> None:
     table_payload, legend = handler("cov")
     assert legend == _columns_help_markdown(_HEADLINE_COLUMN_HELP_COV)
     assert table_payload["headers"][1] == "Macro F1"
-    # Row data is the cov computation, not the "all" one.
-    assert table_payload["data"][0][1] == "75.0"
+    # Row data stays numeric so TanStack Table's sort compares magnitudes.
+    assert float(table_payload["data"][0][1]) == pytest.approx(75.0, rel=1e-6)
+    # The user-facing string lives in metadata.display_value.
+    assert table_payload["metadata"]["display_value"][0][1] == "75.0"
