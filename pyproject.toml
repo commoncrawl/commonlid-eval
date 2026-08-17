@@ -225,3 +225,8 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 
+[tool.uv]
+# prevent uv from installing any new package 
+# (give the community enough time to detect malware and yank)
+exclude-newer = "7 days"
+
