@@ -69,6 +69,20 @@ commonlid run \
 
 You may indeed reinstall the `commonlid` package with your changes if the package was not installed in editable mode.
 
+For LLM (`dspy:`) models, estimate the token usage and cost before committing to
+a full run:
+
+```bash
+commonlid estimate-tokens \
+  --model dspy:openai/gpt-5 \
+  --dataset commonlid \
+  --reasoning-tokens 300
+```
+
+This makes no API calls — it tokenizes the reconstructed prompt with the model's
+own tokenizer and prices it via LiteLLM. See the README's "Estimate tokens &
+cost" section for details.
+
 ## Uploading the results data (PR-based)
 
 After running the evaluation locally, you can upload the results to our [HF results repository](https://huggingface.co/datasets/commoncrawl/commonlid-results) as follows:
