@@ -15,6 +15,7 @@ src/commonlid/
 │   ├── _fasttext_base.py   # Shared HF-fasttext plumbing (GlotLID/OpenLID-v2/fasttext)
 │   ├── cld2.py, cld3.py, glotlid.py, openlidv2.py, fasttext_ft.py,
 │   │ pyfranc.py, afrolid.py, funlangid.py
+│   ├── google_translate.py # Google Cloud Translation `detect` (API key)
 │   └── dspy_llm.py         # DSPyLLMModel — NOT auto-registered (per-instance config)
 ├── datasets/                  # One submodule per evaluation dataset; auto-registered
 │   ├── commonlid.py        # commoncrawl/CommonLID
