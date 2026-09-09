@@ -467,19 +467,9 @@ happen to share a range. Only compare a model's scores with its own.
 | `AfroLID` | yes | The text-classification pipeline's softmax probability, 0-1 |
 | `commonlingua` | yes | Softmax over the model's class logits, 0-1 |
 | `funlangid` | yes | Fraction of the text's character 4-grams covered by the winning language's lexicon. Does not sum to 1 across languages |
-| `GlotLID`, `OpenLID-v2`, `fasttext` | no | See below |
+| `GlotLID`, `OpenLID-v2`, `fasttext` | no | The batched `multilinePredict` these wrappers use returns bare labels under the pinned `fasttext-predict` dependency; see the note in `src/commonlid/models/_fasttext_base.py` |
 | `cld2` | no | CLD2 returns `percent` (share of the input in that language) and an unbounded internal `score` in the hundreds. Neither is a confidence |
 | `pyfranc` | no | franc normalises every candidate against the best one, so the top-1 score is 1.0 for every input |
-
-The fasttext models are the interesting omission. fasttext computes a
-probability, but only the per-text `predict` entry point returns it; the
-batched `multilinePredict` that these wrappers use returns bare labels under
-the pinned `fasttext-predict` runtime dependency. The two entry points are
-not interchangeable: they disagree on near-ties, changing the label on 5 of
-200 UDHR samples (all Romani variants scoring below 0.52), and
-`tests/integration/test_smoke_parity.py` pins the `multilinePredict` labels
-to the published research pipeline. Parity with the paper wins over the
-score.
 
 To expose a score from a new model, return `LIDPrediction` objects from
 `_predict_batch` instead of bare codes. The two are interchangeable within a
