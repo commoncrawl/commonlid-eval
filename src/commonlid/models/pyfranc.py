@@ -1,4 +1,9 @@
-"""pyfranc (franc) model wrapper."""
+"""pyfranc (franc) model wrapper.
+
+This model reports no confidence. franc normalises every candidate score
+against the best one, so the top-1 score is 1.0 for every input and carries
+no information.
+"""
 
 from __future__ import annotations
 

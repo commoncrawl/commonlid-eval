@@ -4,6 +4,11 @@ CLD2's output format is a ``(isReliable, bytes_found, details)`` tuple; the
 first ``details`` entry is ``(name, code, percent, score)``. We only take the
 two-letter code, strip any script suffix, and map the sentinel "unknown"
 codes (``un``, ``xx``, ``zzp``) to ``None``.
+
+This model reports no confidence (:attr:`LIDPrediction.score` stays ``None``).
+Neither of CLD2's two numbers is one: ``percent`` is the share of the input
+attributed to that language, and ``score`` is an unbounded internal quantity
+(hundreds to thousands), not a probability.
 """
 
 from __future__ import annotations

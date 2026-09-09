@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
 
 # Per the upstream cld3-py README, CLD3 emits one of these BCP-47 codes
@@ -162,12 +162,14 @@ class CLD3Model(LIDModel):
         )
         super().load()
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
-        out: list[str | None] = []
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+        out: list[LIDPrediction] = []
         for text in texts:
             result = self._detector.FindLanguage(text=text)
             code = result.language.split("-")[0]
-            out.append(None if code == "und" else code)
+            # CLD3's `probability` is the neural net's softmax over languages.
+            score = float(result.probability)
+            out.append(LIDPrediction(None if code == "und" else code, score))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:

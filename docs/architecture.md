@@ -8,7 +8,7 @@ top-level `README.md`.
 ```
 src/commonlid/
 ├── core/               # Abstract base classes + decorator registry
-│   ├── lid_model.py        # LIDModel ABC, LIDPrediction, _conform pipeline
+│   ├── lid_model.py        # LIDModel ABC, LIDPrediction (code + score), _conform
 │   ├── lid_dataset.py      # LIDDataset ABC, pinned HF revision, iter_batches
 │   └── registry.py         # @register_model / @register_dataset
 ├── models/                 # One submodule per LID model; auto-registered
@@ -23,7 +23,7 @@ src/commonlid/
 ├── evaluation/
 │   ├── evaluator.py        # cartesian product (models x datasets) → files
 │   ├── results.py          # Result dataclass, summary.json, predictions.jsonl
-│   └── cache.py            # Per-(model, dataset) text-hash-keyed cache
+│   └── cache.py            # Per-(model, dataset) text-hash-keyed cache (code + score)
 ├── metrics/
 │   ├── core.py             # compute_per_language_metrics, LanguageMetrics
 │   ├── aggregate.py        # macro_average / micro_average (gold-only + observed views)

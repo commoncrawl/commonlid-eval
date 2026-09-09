@@ -1,4 +1,13 @@
-"""Shared plumbing for fasttext-based LID models (GlotLID, OpenLID-v2, fasttext-ft)."""
+"""Shared plumbing for fasttext-based LID models (GlotLID, OpenLID-v2, fasttext-ft).
+
+These models report no confidence. fasttext does compute one, but not on a
+path we can use. The runtime dependency ``fasttext-predict`` returns bare
+labels from the batched ``multilinePredict``; its per-text ``predict`` does
+return ``(prob, label)``, but the two entry points disagree on near-ties --
+5 of 200 UDHR samples change label, all Romani variants scoring below 0.52 --
+and ``tests/integration/test_smoke_parity.py`` pins the ``multilinePredict``
+labels to the published research pipeline. Parity wins over the score.
+"""
 
 from __future__ import annotations
 

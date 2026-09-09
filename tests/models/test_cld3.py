@@ -6,6 +6,7 @@ import sys
 
 import pytest
 
+from commonlid.core.lid_model import LIDPrediction
 from commonlid.models.cld3 import CLD3Model
 
 pytest.importorskip("gcld3")
@@ -38,6 +39,16 @@ def test_predict_returns_iso639_3() -> None:
     assert preds == ["eng", "fra", "rus", "zho"]
 
 
+def test_predict_scored_returns_the_network_probability() -> None:
+    scored = CLD3Model().predict_scored([
+        "This is an English sentence written in clear English prose.",
+    ])
+    assert len(scored) == 1
+    assert scored[0].iso639_3 == "eng"
+    assert scored[0].score is not None
+    assert 0.0 <= scored[0].score <= 1.0
+
+
 def test_predict_maps_und_to_none() -> None:
     """A raw ``und`` from CLD3 must surface as None, not an iso639 conform error.
 
@@ -61,6 +72,8 @@ def test_predict_maps_und_to_none() -> None:
     model.load()
     model._detector = _FakeDetector()
     assert model.predict(["whatever"]) == [None]
+    # The probability is kept even though the code is unusable.
+    assert model.predict_scored(["whatever"]) == [LIDPrediction(None, 1.0)]
 
 
 def test_discover_supported_languages_includes_majors() -> None:

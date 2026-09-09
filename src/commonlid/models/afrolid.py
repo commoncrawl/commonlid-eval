@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
 
 
@@ -44,13 +44,15 @@ class AfroLIDModel(LIDModel):
         self._pipeline = pipeline("text-classification", model="UBC-NLP/afrolid_1.5", device=device)
         super().load()
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
         assert self._pipeline is not None  # load() has run
         results = self._pipeline(list(texts), truncation=True, max_length=512)
-        out: list[str | None] = []
+        out: list[LIDPrediction] = []
         for entry in results:
             label = entry["label"]
-            out.append(None if label == "nan_lang" else label)
+            # `score` is the text-classification pipeline's softmax probability.
+            score = float(entry["score"])
+            out.append(LIDPrediction(None if label == "nan_lang" else label, score))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:
