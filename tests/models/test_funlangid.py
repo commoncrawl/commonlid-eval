@@ -25,3 +25,18 @@ def test_predicts_undefined_on_empty_after_clean() -> None:
     # which the wrapper maps to None.
     preds = model.predict(["123!!!"])
     assert preds == [None]
+
+
+def test_predict_scored_returns_the_classifier_score() -> None:
+    from commonlid.models.funlangid import FunLangIDModel
+
+    scored = FunLangIDModel().predict_scored([
+        "The quick brown fox jumps over the lazy dog",
+        "",
+    ])
+    assert scored[0].iso639_3 == "eng"
+    assert scored[0].score is not None
+    assert 0.0 < scored[0].score <= 1.0
+    # Nothing to score: no code and no confidence.
+    assert scored[1].iso639_3 is None
+    assert scored[1].score is None

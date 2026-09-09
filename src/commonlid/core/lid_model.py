@@ -30,6 +30,10 @@ class LIDModel(ABC):
     (unless ``requires_preprocessing`` is ``False``) before delegating.
     Predicted codes are passed through :func:`conform_langcode` so every
     model emits canonical ISO 639-3 codes.
+
+    Backends that report a confidence return :class:`LIDPrediction` objects
+    from :meth:`_predict_batch`; :meth:`predict_scored` surfaces them.
+    :meth:`predict` keeps returning bare codes.
     """
 
     # `model_id` is a class attribute set by subclasses; a small number of
@@ -48,19 +52,42 @@ class LIDModel(ABC):
         self._loaded = True
 
     @abstractmethod
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
-        """Core prediction hook; must return an ISO 639-3 code or ``None`` per input."""
+    def _predict_batch(self, texts: Sequence[str]) -> Sequence[str | LIDPrediction | None]:
+        """Core prediction hook; one entry per input text.
+
+        Return a raw language code, ``None`` for "undetermined", or a
+        :class:`LIDPrediction` when the backend also reports a confidence.
+        Returning a bare code is equivalent to a prediction with no score.
+        """
 
     def predict(self, texts: Sequence[str]) -> list[str | None]:
         """Return an ISO 639-3 code (or ``None`` for undetermined) per input text."""
+        return [p.iso639_3 for p in self.predict_scored(texts)]
+
+    def predict_scored(self, texts: Sequence[str]) -> list[LIDPrediction]:
+        """Return a :class:`LIDPrediction` per input text.
+
+        ``score`` is whatever confidence the backend reported, or ``None``
+        when it reports none. Scales differ between models (a softmax
+        probability is not comparable to a distance-derived score), so treat
+        it as a per-model quantity rather than a cross-model one. A score is
+        kept even when the raw code fails to conform, because it still says
+        the model was confident about something unmappable.
+        """
         if not self._loaded:
             self.load()
         if self.requires_preprocessing:
             prepared = [openlid_normer_clean_line(t) for t in texts]
         else:
             prepared = list(texts)
-        raw = self._predict_batch(prepared)
-        return [self._conform(code) for code in raw]
+        return [self._as_prediction(raw) for raw in self._predict_batch(prepared)]
+
+    @classmethod
+    def _as_prediction(cls, raw: str | LIDPrediction | None) -> LIDPrediction:
+        """Normalise one ``_predict_batch`` entry into a conformed prediction."""
+        if isinstance(raw, LIDPrediction):
+            return LIDPrediction(cls._conform(raw.iso639_3), raw.score)
+        return LIDPrediction(cls._conform(raw), None)
 
     def supports(self, iso639_3: str) -> bool:
         """Whether the model declares support for the given ISO 639-3 language."""

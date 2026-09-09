@@ -95,7 +95,14 @@ Ad-hoc prediction on a single string — no dataset, no result files:
 
 ```bash
 commonlid predict --model GlotLID --text "Le chat dort sur le canapé."
-# {"text": "Le chat dort sur le canapé.", "pred": "fra", "model": "GlotLID"}
+# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": null, "model": "GlotLID"}
+```
+
+`score` carries the model's own confidence where it reports one:
+
+```bash
+commonlid predict --model cld3 --text "Le chat dort sur le canapé."
+# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": 1.0, "model": "cld3"}
 ```
 
 Pipe a file through a model (use `-` for stdin):
@@ -184,6 +191,20 @@ preds = model.predict([
     "素早い茶色の狐が怠け者の犬を飛び越える",
 ])
 assert preds == ["eng", "deu", "jpn"]
+```
+
+`predict_scored` returns the same codes plus each model's confidence:
+
+<!-- readme-test: fast; id=ad-hoc-predict-scored -->
+```python
+from commonlid import get_model
+
+scored = get_model("cld3").predict_scored(["The quick brown fox jumps over the lazy dog"])
+assert scored[0].iso639_3 == "eng"
+assert 0.0 <= scored[0].score <= 1.0
+
+# cld2 reports no confidence, so the score is None.
+assert get_model("cld2").predict_scored(["hello there"])[0].score is None
 ```
 
 ### List models / datasets
@@ -429,6 +450,41 @@ In the metrics layer, any `None` prediction is bucketed as `"und"`
 still report an abstention rate; `macro_average` / `micro_average`
 exclude the `und` bucket by default (toggle with `include_und=True`).
 
+## Confidence scores
+
+`LIDModel.predict()` returns bare ISO 639-3 codes.
+`LIDModel.predict_scored()` returns a `LIDPrediction(iso639_3, score)` per
+input instead, and that `score` is what the evaluator writes to
+`predictions.jsonl` and the CLI writes to stdout.
+
+**Scores are per-model, not comparable across models.** A softmax
+probability and a lexicon coverage ratio are different quantities that
+happen to share a range. Only compare a model's scores with its own.
+
+| `model_id` | `score` | What the number is |
+|---|---|---|
+| `cld3` | yes | The neural net's softmax probability, 0-1 |
+| `AfroLID` | yes | The text-classification pipeline's softmax probability, 0-1 |
+| `commonlingua` | yes | Softmax over the model's class logits, 0-1 |
+| `funlangid` | yes | Fraction of the text's character 4-grams covered by the winning language's lexicon. Does not sum to 1 across languages |
+| `GlotLID`, `OpenLID-v2`, `fasttext` | no | See below |
+| `cld2` | no | CLD2 returns `percent` (share of the input in that language) and an unbounded internal `score` in the hundreds. Neither is a confidence |
+| `pyfranc` | no | franc normalises every candidate against the best one, so the top-1 score is 1.0 for every input |
+
+The fasttext models are the interesting omission. fasttext computes a
+probability, but only the per-text `predict` entry point returns it; the
+batched `multilinePredict` that these wrappers use returns bare labels under
+the pinned `fasttext-predict` runtime dependency. The two entry points are
+not interchangeable: they disagree on near-ties, changing the label on 5 of
+200 UDHR samples (all Romani variants scoring below 0.52), and
+`tests/integration/test_smoke_parity.py` pins the `multilinePredict` labels
+to the published research pipeline. Parity with the paper wins over the
+score.
+
+To expose a score from a new model, return `LIDPrediction` objects from
+`_predict_batch` instead of bare codes. The two are interchangeable within a
+single batch, so wrappers that have no confidence need no changes.
+
 ## Adding a new model
 
 A guide for adding a new model can be found [here](docs/contributing/adding_a_model.md).
@@ -540,8 +596,11 @@ Each `(model, dataset)` run produces two files.
 One line per sample:
 
 ```json
-{"idx": 0, "text_hash": "abcd1234efgh5678", "gold": "eng", "pred": "eng", "correct": true}
+{"idx": 0, "text_hash": "abcd1234efgh5678", "gold": "eng", "pred": "eng", "score": 0.98, "correct": true}
 ```
+
+`score` is the model's own confidence, or `null` for models that report
+none. See [Confidence scores](#confidence-scores).
 
 ## Analysis
 

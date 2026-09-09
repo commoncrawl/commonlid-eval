@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
 
 if TYPE_CHECKING:
@@ -84,7 +84,7 @@ class CommonLinguaModel(LIDModel):
                 out[i, : len(raw)] = np.frombuffer(raw, dtype=np.uint8)
         return torch.from_numpy(out)
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
         import torch
 
         if not self._loaded:
@@ -92,14 +92,22 @@ class CommonLinguaModel(LIDModel):
         assert self._idx2lang is not None
         assert self._device is not None
 
-        results: list[str | None] = []
+        results: list[LIDPrediction] = []
         for start in range(0, len(texts), self._INTERNAL_BATCH):
             chunk = list(texts[start : start + self._INTERNAL_BATCH])
             batch = self._encode(chunk).to(self._device)
             with torch.no_grad():
                 logits = self._model(batch)
-                pred_idx = logits.argmax(dim=-1).cpu().tolist()
-            results.extend(self._idx2lang[int(i)] for i in pred_idx)
+                # Softmax over the class logits gives the model's own
+                # confidence in the argmax it already reports.
+                probs = torch.softmax(logits, -1)
+                top_prob, pred_idx = probs.max(dim=-1)
+                indices = pred_idx.cpu().tolist()
+                scores = top_prob.cpu().tolist()
+            results.extend(
+                LIDPrediction(self._idx2lang[int(i)], float(p))
+                for i, p in zip(indices, scores, strict=True)
+            )
         return results
 
     def discover_supported_languages(self) -> frozenset[str]:

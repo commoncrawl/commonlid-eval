@@ -44,6 +44,24 @@ from commonlid.models import my_model as _my_model  # noqa: F401
 ```
 
 
+### Reporting a confidence
+
+`_predict_batch` may return a `LIDPrediction(iso639_3, score)` in place of a
+bare code whenever the backend reports a confidence. The two forms mix freely
+within one batch, and `predict()` keeps returning bare codes either way.
+
+```python
+from commonlid.core.lid_model import LIDModel, LIDPrediction
+
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+        return [LIDPrediction("eng", 0.97) for _ in texts]
+```
+
+The score reaches `predictions.jsonl` and `commonlid predict` output. Only
+pass a real confidence: a constant, or a number on an unbounded scale, is
+worse than `None` because it reads like one. See the table in the README for
+what each shipped model does.
+
 ### Adding model dependencies
 
 If you are adding a model that requires additional dependencies, you can add them to the `pyproject.toml` file, under optional dependencies:

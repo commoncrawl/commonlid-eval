@@ -188,7 +188,11 @@ def predict(
         typer.Option("--text-file", help="Newline-delimited text file ('-' for stdin)."),
     ] = None,
 ) -> None:
-    """Run a model against ad-hoc text, writing JSONL predictions to stdout."""
+    """Run a model against ad-hoc text, writing JSONL predictions to stdout.
+
+    Each line carries the model's own confidence as ``score``, or ``null``
+    for backends that do not report one.
+    """
     if text is None and text_file is None:
         typer.echo("Either --text or --text-file must be provided.", err=True)
         raise typer.Exit(code=2)
@@ -200,9 +204,16 @@ def predict(
         texts.extend(_read_lines(text_file))
 
     lid_model = get_model(model)
-    preds = lid_model.predict(texts)
+    preds = lid_model.predict_scored(texts)
     for t, p in zip(texts, preds, strict=True):
-        typer.echo(json.dumps({"text": t, "pred": p, "model": model}))
+        typer.echo(
+            json.dumps({
+                "text": t,
+                "pred": p.iso639_3,
+                "score": p.score,
+                "model": model,
+            })
+        )
 
 
 @app.command("generate-support-matrix")

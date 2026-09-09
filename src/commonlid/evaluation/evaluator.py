@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
+from commonlid.core.lid_model import LIDPrediction
 from commonlid.evaluation.cache import PredictionCache
 from commonlid.evaluation.results import Result, write_predictions, write_summary
 from commonlid.metrics.core import UND_TOKEN, compute_per_language_metrics
@@ -139,13 +140,15 @@ class Evaluator:
                 limit=self.config.limit,
             ):
                 preds = self._predict_with_cache(model, cache, texts)
-                for text, gold, pred in zip(texts, golds, preds, strict=True):
+                for text, gold, prediction in zip(texts, golds, preds, strict=True):
+                    pred = prediction.iso639_3
                     pred_for_metrics = UND_TOKEN if pred is None else pred
                     prediction_rows.append({
                         "idx": idx,
                         "text_hash": _text_hash(text),
                         "gold": gold,
                         "pred": pred,
+                        "score": prediction.score,
                         "correct": bool(gold is not None and gold == pred_for_metrics),
                     })
                     ytrue.append(gold)
@@ -223,11 +226,11 @@ class Evaluator:
         model: LIDModel,
         cache: PredictionCache | None,
         texts: list[str],
-    ) -> list[str | None]:
+    ) -> list[LIDPrediction]:
         if cache is None:
-            return model.predict(texts)
+            return model.predict_scored(texts)
 
-        preds: list[str | None] = [None] * len(texts)
+        preds: list[LIDPrediction] = [LIDPrediction(None, None)] * len(texts)
         missing_idx: list[int] = []
         missing_texts: list[str] = []
         for i, text in enumerate(texts):
@@ -239,8 +242,8 @@ class Evaluator:
                 missing_texts.append(text)
 
         if missing_texts:
-            fresh = model.predict(missing_texts)
-            pairs: list[tuple[str, str | None]] = []
+            fresh = model.predict_scored(missing_texts)
+            pairs: list[tuple[str, LIDPrediction]] = []
             for offset, pred in enumerate(fresh):
                 i = missing_idx[offset]
                 preds[i] = pred
