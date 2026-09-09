@@ -15,6 +15,7 @@ from commonlid.models import commonlingua as _commonlingua  # noqa: F401
 from commonlid.models import fasttext_ft as _fasttext_ft  # noqa: F401
 from commonlid.models import funlangid as _funlangid  # noqa: F401
 from commonlid.models import glotlid as _glotlid  # noqa: F401
+from commonlid.models import google_translate as _google_translate  # noqa: F401
 from commonlid.models import openlidv2 as _openlidv2  # noqa: F401
 from commonlid.models import pyfranc as _pyfranc  # noqa: F401
 from commonlid.models.dspy_llm import DSPyLLMModel

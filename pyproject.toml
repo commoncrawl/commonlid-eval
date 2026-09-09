@@ -59,6 +59,11 @@ llm = [
     "botocore>=1.35",
 ]
 cld3 = ["cld3-py>=3.1"]
+google-translate = [
+    # Cloud Translation v3 `detectLanguage`. Named after the service rather
+    # than the vendor so a future Google model gets its own extra.
+    "google-cloud-translate>=3.16",
+]
 commonlingua = [
     # CommonLingua is a 2.35M-param byte-level model; needs torch but not the
     # transformers stack that [afrolid] pulls in.
@@ -77,6 +82,9 @@ dev = [
     "botocore>=1.35",
     # duplicate of the `cld3` extra so the test suite can exercise CLD3Model
     "cld3-py>=3.1",
+    # duplicate of the `google-translate` extra so the test suite can
+    # exercise GoogleTranslateModel against a mocked client.
+    "google-cloud-translate>=3.16",
     # duplicate of the `leaderboard` extra so the test suite can import the app.
     "gradio>=5",
     "ruff>=0.6",
@@ -93,7 +101,7 @@ notebooks = [
     "nbclient>=0.10",
 ]
 all = [
-    "commonlid[afrolid,llm,commonlingua]",
+    "commonlid[afrolid,llm,commonlingua,google-translate]",
 ]
 
 [project.scripts]
@@ -183,6 +191,8 @@ module = [
     "transformers.*",
     "torch.*",
     "gcld3.*",
+    "google.cloud.*",
+    "google.api_core.*",
     "pandas.*",
     "sklearn.*",
 ]

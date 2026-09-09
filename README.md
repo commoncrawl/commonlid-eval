@@ -40,6 +40,7 @@ pip install commonlid                      # core deps + classical LID models
 pip install "commonlid[llm]"               # + DSPy-based LLM evaluation
 pip install "commonlid[afrolid]"           # + torch/transformers for AfroLID
 pip install "commonlid[commonlingua]"      # + torch for the CommonLingua byte-level model
+pip install "commonlid[google-translate]"  # + the Google Cloud Translation client
 pip install "commonlid[notebooks]"         # + jupyterlab + matplotlib for paper_tables.ipynb
 pip install "commonlid[all]"               # everything runtime-facing
 ```
@@ -214,8 +215,8 @@ assert get_model("cld2").predict_scored(["hello there"])[0].score is None
 from commonlid import list_models, list_datasets
 
 assert list_models() == [
-    "AfroLID", "GlotLID", "OpenLID-v2", "cld2", "cld3",
-    "commonlingua", "fasttext", "funlangid", "pyfranc",
+    "AfroLID", "GlotLID", "GoogleTranslate", "OpenLID-v2", "cld2",
+    "cld3", "commonlingua", "fasttext", "funlangid", "pyfranc",
 ]
 assert list_datasets() == [
     "bibles_300", "bibles_300_nano",
@@ -323,6 +324,7 @@ for line in preds_path.read_text().splitlines():
 | `AfroLID` | [UBC-NLP/afrolid_1.5](https://huggingface.co/UBC-NLP/afrolid_1.5) | Requires `[afrolid]` extra |
 | `commonlingua` | [PleIAs/CommonLingua](https://huggingface.co/PleIAs/CommonLingua) | 2.35M-param byte-level model, 334 languages; requires `[commonlingua]` extra |
 | `funlangid` | Vendored in `src/commonlid/vendor/fun_langid.py` | Simple char-4gram baseline |
+| `GoogleTranslate` | [Cloud Translation](https://docs.cloud.google.com/translate/docs/basic/detecting-language) | Requires `[google-translate]` extra + the `GOOGLE_TRANSLATE_API_KEY` env var |
 
 LLM models are instantiated dynamically (`DSPyLLMModel`) and not
 auto-registered — they need per-instance configuration (endpoint + key).
@@ -391,6 +393,9 @@ normalisation pipeline so downstream metrics always see canonical ISO
    - `cld2` → `un`, `xx`, `zzp` (`src/commonlid/models/cld2.py`)
    - `cld3` / `funlangid` → `und` (`src/commonlid/models/cld3.py`,
      `funlangid.py`)
+   - `GoogleTranslate` → `und`, and BCP-47 outputs are cut at the first
+     `-` so `zh-CN` becomes `zh`
+     (`src/commonlid/models/google_translate.py`)
    - `AfroLID` → `nan_lang` (`src/commonlid/models/afrolid.py`)
    - fasttext-based models (`GlotLID`, `OpenLID-v2`, `fasttext`) parse
      `__label__{code}_{script}` down to just `{code}`
@@ -463,6 +468,7 @@ happen to share a range. Only compare a model's scores with its own.
 
 | `model_id` | `score` | What the number is |
 |---|---|---|
+| `GoogleTranslate` | yes | The API's `confidence` field, 0-1. Documented as optional, so occasionally `null` |
 | `cld3` | yes | The neural net's softmax probability, 0-1 |
 | `AfroLID` | yes | The text-classification pipeline's softmax probability, 0-1 |
 | `commonlingua` | yes | Softmax over the model's class logits, 0-1 |
