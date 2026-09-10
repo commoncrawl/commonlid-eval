@@ -64,6 +64,7 @@ commonlingua = [
     # transformers stack that [afrolid] pulls in.
     "torch>=2.4",
 ]
+py3langid = ["py3langid>=0.4"]
 leaderboard = [
     # gradio 4.x imports HfFolder from huggingface_hub, which was removed in
     # huggingface-hub 1.0; gradio 5 dropped that import.
@@ -175,6 +176,7 @@ module = [
     "fasttext.*",
     "pycld2.*",
     "pyfranc.*",
+    "py3langid.*",
     "iso639.*",
     "datasets.*",
     "huggingface_hub.*",

@@ -900,6 +900,9 @@ notebooks = [
     { name = "matplotlib" },
     { name = "nbclient" },
 ]
+py3langid = [
+    { name = "py3langid" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -928,6 +931,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "protobuf", marker = "extra == 'afrolid'", specifier = ">=4.25" },
+    { name = "py3langid", marker = "extra == 'py3langid'", specifier = ">=0.4" },
     { name = "pycld2", specifier = ">=0.42" },
     { name = "pyfranc", specifier = ">=0.2.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
@@ -944,7 +948,7 @@ requires-dist = [
     { name = "types-regex", marker = "extra == 'dev'" },
     { name = "types-tqdm", marker = "extra == 'dev'" },
 ]
-provides-extras = ["afrolid", "llm", "cld3", "commonlingua", "leaderboard", "dev", "notebooks", "all"]
+provides-extras = ["afrolid", "llm", "cld3", "commonlingua", "py3langid", "leaderboard", "dev", "notebooks", "all"]
 
 [[package]]
 name = "contourpy"
@@ -4437,6 +4441,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/05/0a34433a064256a578f1783a10da6df098ceaa4a57bbeaa96a6c0352786b/pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42", size = 19752, upload-time = "2024-07-21T12:58:21.801Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0", size = 11842, upload-time = "2024-07-21T12:58:20.04Z" },
+]
+
+[[package]]
+name = "py3langid"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/fc/51c88e5ef8346878ae6c09e1f7c86c6e6308c57794723bf423a72ddba4dd/py3langid-0.4.0.tar.gz", hash = "sha256:5924159039b5cc282c2edc10a7ea9363b2099834a0e99ed8d5bea3cc435d7871", size = 4604185, upload-time = "2026-09-02T09:10:53.983Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/2d/0eeff2727c970b1d553be70d15ba2d84e3830696c09a79d954c5ae3d5212/py3langid-0.4.0-py3-none-any.whl", hash = "sha256:c25bd038147951ba3a89efe9ec12cc7d2116cb6f311ff8af84ade398a8bc0616", size = 4600605, upload-time = "2026-09-02T09:10:49.54Z" },
 ]
 
 [[package]]
