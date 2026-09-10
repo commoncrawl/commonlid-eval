@@ -215,7 +215,8 @@ from commonlid import list_models, list_datasets
 
 assert list_models() == [
     "AfroLID", "GlotLID", "OpenLID-v2", "cld2", "cld3",
-    "commonlingua", "fasttext", "funlangid", "pyfranc",
+    "commonlingua", "fasttext", "funlangid", "py3langid",
+    "pyfranc",
 ]
 assert list_datasets() == [
     "bibles_300", "bibles_300_nano",
@@ -323,6 +324,7 @@ for line in preds_path.read_text().splitlines():
 | `AfroLID` | [UBC-NLP/afrolid_1.5](https://huggingface.co/UBC-NLP/afrolid_1.5) | Requires `[afrolid]` extra |
 | `commonlingua` | [PleIAs/CommonLingua](https://huggingface.co/PleIAs/CommonLingua) | 2.35M-param byte-level model, 334 languages; requires `[commonlingua]` extra |
 | `funlangid` | Vendored in `src/commonlid/vendor/fun_langid.py` | Simple char-4gram baseline |
+| `py3langid` | [py3langid](https://pypi.org/project/py3langid/) | Pure Python + numpy, 139 languages; abstains below 0.25 confidence. Requires `[py3langid]` extra |
 
 LLM models are instantiated dynamically (`DSPyLLMModel`) and not
 auto-registered — they need per-instance configuration (endpoint + key).
@@ -466,6 +468,7 @@ happen to share a range. Only compare a model's scores with its own.
 | `cld3` | yes | The neural net's softmax probability, 0-1 |
 | `AfroLID` | yes | The text-classification pipeline's softmax probability, 0-1 |
 | `commonlingua` | yes | Softmax over the model's class logits, 0-1 |
+| `py3langid` | yes | Normalized naive Bayes posterior of the top label, 0-1; predictions below 0.25 abstain but keep their score |
 | `funlangid` | yes | Fraction of the text's character 4-grams covered by the winning language's lexicon. Does not sum to 1 across languages |
 | `GlotLID`, `OpenLID-v2`, `fasttext` | no | The batched `multilinePredict` these wrappers use returns bare labels under the pinned `fasttext-predict` dependency; see the note in `src/commonlid/models/_fasttext_base.py` |
 | `cld2` | no | CLD2 returns `percent` (share of the input in that language) and an unbounded internal `score` in the hundreds. Neither is a confidence |

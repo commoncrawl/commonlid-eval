@@ -23,6 +23,7 @@ EXPECTED_MODEL_IDS = {
     "commonlingua",
     "fasttext",
     "funlangid",
+    "py3langid",
     "pyfranc",
 }
 
