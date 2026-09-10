@@ -16,6 +16,7 @@ src/commonlid/
 │   ├── cld2.py, cld3.py, glotlid.py, openlidv2.py, fasttext_ft.py,
 │   │ pyfranc.py, afrolid.py, funlangid.py
 │   ├── google_translate_v2.py # Cloud Translation Basic v2 `detect` (API key)
+│   ├── google_translate_v3.py # Cloud Translation Advanced v3 `detectLanguage` (ADC)
 │   └── dspy_llm.py         # DSPyLLMModel — NOT auto-registered (per-instance config)
 ├── datasets/                  # One submodule per evaluation dataset; auto-registered
 │   ├── commonlid.py        # commoncrawl/CommonLID

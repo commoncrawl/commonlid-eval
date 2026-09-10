@@ -78,7 +78,13 @@ class GoogleTranslateV2Model(LIDModel):
             return
         try:
             import google.auth.api_key
-            from google.cloud import translate_v2
+
+            # Imported as a module rather than `from google.cloud import
+            # translate_v2`: `translate_v2` ships no py.typed, so once any
+            # typed `google.cloud.*` module is in play (the v3 wrapper
+            # imports one) mypy reports it as a missing attribute of the
+            # namespace package.
+            import google.cloud.translate_v2 as translate_v2
         except ImportError as exc:
             raise ImportError(_MISSING_DEPS_MSG) from exc
 
