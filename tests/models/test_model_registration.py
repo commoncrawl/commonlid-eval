@@ -17,7 +17,7 @@ def _import_models() -> None:
 EXPECTED_MODEL_IDS = {
     "AfroLID",
     "GlotLID",
-    "GoogleTranslate",
+    "GoogleTranslate-v2",
     "OpenLID-v2",
     "cld2",
     "cld3",

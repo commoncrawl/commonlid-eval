@@ -1,4 +1,4 @@
-"""Unit tests for the Google Cloud Translation model wrapper.
+"""Unit tests for the Cloud Translation Basic (v2) model wrapper.
 
 Never touches the network: every test either swaps ``_client`` for a fake or
 monkeypatches the client library out of ``sys.modules``.
@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from commonlid.core.lid_model import LIDPrediction
-from commonlid.models.google_translate import API_KEY_ENV, GoogleTranslateModel
+from commonlid.models.google_translate_v2 import API_KEY_ENV, GoogleTranslateV2Model
 
 
 class _FakeClient:
@@ -33,9 +33,9 @@ class _FakeClient:
         return self._languages
 
 
-def _loaded_model(client: _FakeClient, **kwargs: Any) -> GoogleTranslateModel:
+def _loaded_model(client: _FakeClient, **kwargs: Any) -> GoogleTranslateV2Model:
     """A model wired to a fake client, skipping the real ``load()``."""
-    model = GoogleTranslateModel(**kwargs)
+    model = GoogleTranslateV2Model(**kwargs)
     model._client = client
     model._loaded = True
     return model
@@ -47,13 +47,13 @@ def test_load_raises_helpful_error_without_client_library(
     monkeypatch.setenv(API_KEY_ENV, "test-key")
     monkeypatch.setitem(sys.modules, "google.cloud", None)
     with pytest.raises(ImportError, match=r"commonlid\[google-translate\]"):
-        GoogleTranslateModel().load()
+        GoogleTranslateV2Model().load()
 
 
 def test_load_raises_when_api_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(API_KEY_ENV, raising=False)
     with pytest.raises(RuntimeError, match=API_KEY_ENV):
-        GoogleTranslateModel().load()
+        GoogleTranslateV2Model().load()
 
 
 def test_load_passes_api_key_credentials_and_is_idempotent(
@@ -72,7 +72,7 @@ def test_load_passes_api_key_credentials_and_is_idempotent(
     monkeypatch.setattr("google.auth.api_key.Credentials", fake_credentials)
     monkeypatch.setattr("google.cloud.translate_v2.Client", fake_client)
 
-    model = GoogleTranslateModel(api_key="explicit-key")
+    model = GoogleTranslateV2Model(api_key="explicit-key")
     model.load()
     client = model._client
     model.load()
@@ -153,7 +153,7 @@ def test_single_element_dict_response_is_coerced_to_a_list() -> None:
 
 
 def test_batch_is_chunked_and_order_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(GoogleTranslateModel, "_MAX_SEGMENTS_PER_REQUEST", 2)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_MAX_SEGMENTS_PER_REQUEST", 2)
     codes = ["en", "de", "fr", "ru", "es"]
     client = _FakeClient(
         responses=[
@@ -169,7 +169,7 @@ def test_batch_is_chunked_and_order_is_preserved(monkeypatch: pytest.MonkeyPatch
 
 
 def test_chunking_respects_the_character_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(GoogleTranslateModel, "_MAX_CHARS_PER_REQUEST", 20)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_MAX_CHARS_PER_REQUEST", 20)
     client = _FakeClient(responses=[[{"language": "en"}], [{"language": "de"}]])
     model = _loaded_model(client, max_workers=1)
 
@@ -178,7 +178,7 @@ def test_chunking_respects_the_character_budget(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_oversized_text_is_clipped_to_the_api_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(GoogleTranslateModel, "_MAX_CHARS_PER_TEXT", 10)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_MAX_CHARS_PER_TEXT", 10)
     client = _FakeClient(responses=[[{"language": "en"}]])
     model = _loaded_model(client, max_workers=1)
 
@@ -187,7 +187,7 @@ def test_oversized_text_is_clipped_to_the_api_limit(monkeypatch: pytest.MonkeyPa
 
 
 def test_concurrent_chunks_keep_input_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(GoogleTranslateModel, "_MAX_SEGMENTS_PER_REQUEST", 1)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_MAX_SEGMENTS_PER_REQUEST", 1)
 
     class _OutOfOrderClient(_FakeClient):
         def detect_language(self, values: list[str]) -> Any:
@@ -206,7 +206,7 @@ def test_concurrent_chunks_keep_input_order(monkeypatch: pytest.MonkeyPatch) -> 
 def test_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     from google.api_core import exceptions as gexc
 
-    monkeypatch.setattr(GoogleTranslateModel, "_BACKOFF_BASE_SECONDS", 0.0)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_BACKOFF_BASE_SECONDS", 0.0)
     attempts: list[int] = []
 
     class _FlakyClient(_FakeClient):
@@ -225,7 +225,7 @@ def test_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_gives_up_after_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
     from google.api_core import exceptions as gexc
 
-    monkeypatch.setattr(GoogleTranslateModel, "_BACKOFF_BASE_SECONDS", 0.0)
+    monkeypatch.setattr(GoogleTranslateV2Model, "_BACKOFF_BASE_SECONDS", 0.0)
 
     class _DeadClient(_FakeClient):
         def detect_language(self, values: list[str]) -> Any:

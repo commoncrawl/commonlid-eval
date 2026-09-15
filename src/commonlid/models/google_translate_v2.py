@@ -1,4 +1,4 @@
-"""Google Cloud Translation language-detection wrapper.
+"""Google Cloud Translation Basic (v2) language-detection wrapper.
 
 Wraps the Cloud Translation `detect
 <https://docs.cloud.google.com/translate/docs/reference/rest/v2/detect>`_
@@ -40,14 +40,14 @@ _MISSING_DEPS_MSG = (
     "The Google Cloud Translation client is not installed. Install the "
     "'commonlid[google-translate]' extra to enable this model."
 )
-_MISSING_KEY_MSG = f"GoogleTranslate needs {API_KEY_ENV} to be set in the environment."
+_MISSING_KEY_MSG = f"GoogleTranslate-v2 needs {API_KEY_ENV} to be set in the environment."
 
 
 @register_model
-class GoogleTranslateModel(LIDModel):
-    """Google Cloud Translation ``detect`` as a LID model."""
+class GoogleTranslateV2Model(LIDModel):
+    """Google Cloud Translation Basic (v2) ``detect`` as a LID model."""
 
-    model_id = "GoogleTranslate"
+    model_id = "GoogleTranslate-v2"
 
     # A v2 request is capped at 100K bytes of payload. Chunk well under that,
     # and cap the segment count too — the API rejects very long `q` lists.

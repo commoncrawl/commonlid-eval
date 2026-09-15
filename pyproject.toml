@@ -83,7 +83,7 @@ dev = [
     # duplicate of the `cld3` extra so the test suite can exercise CLD3Model
     "cld3-py>=3.1",
     # duplicate of the `google-translate` extra so the test suite can
-    # exercise GoogleTranslateModel against a mocked client.
+    # exercise GoogleTranslateV2Model against a mocked client.
     "google-cloud-translate>=3.16",
     # duplicate of the `leaderboard` extra so the test suite can import the app.
     "gradio>=5",
