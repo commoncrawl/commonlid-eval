@@ -41,23 +41,25 @@ pip install "commonlid[llm]"               # + DSPy-based LLM evaluation
 pip install "commonlid[afrolid]"           # + torch/transformers for AfroLID
 pip install "commonlid[commonlingua]"      # + torch for the CommonLingua byte-level model
 pip install "commonlid[google-translate]"  # + the Google Cloud Translation client
+pip install "commonlid[cld3]"              # + cld3-py for the CLD3 model
+pip install "commonlid[leaderboard]"       # + gradio for the leaderboard app
 pip install "commonlid[notebooks]"         # + jupyterlab + matplotlib for paper_tables.ipynb
-pip install "commonlid[all]"               # everything runtime-facing
+pip install "commonlid[all]"               # every optional extra above
 ```
 
 Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv add commonlid                           # runtime only
-uv add "commonlid[all]"                    # all runtime extras
+uv add "commonlid[all]"                    # every optional extra
 ```
 
-For local development (tests, linter, full type-checking dev extra):
+For local development (tests, linter, type-checking via the `dev` dependency group):
 
 ```bash
 git clone https://github.com/commoncrawl/commonlid-eval.git
 cd commonlid-eval
-make install                               # uv sync --extra dev
+make install                               # uv sync (dev group is on by default)
 make check                                 # ruff + mypy + pytest (matches CI)
 source .venv/bin/activate
 ```

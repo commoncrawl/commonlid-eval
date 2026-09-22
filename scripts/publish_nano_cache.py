@@ -8,9 +8,9 @@ access to each parent's private cache (or its build-from-source prerequisites).
 
 Usage::
 
-    uv run --extra dev python scripts/publish_nano_cache.py
-    uv run --extra dev python scripts/publish_nano_cache.py --dry-run
-    uv run --extra dev python scripts/publish_nano_cache.py --only smolsent_300_nano
+    uv run python scripts/publish_nano_cache.py
+    uv run python scripts/publish_nano_cache.py --dry-run
+    uv run python scripts/publish_nano_cache.py --only smolsent_300_nano
 
 After the run finishes, the script prints the HEAD SHA of each per-nano repo
 plus a copy-pastable Python snippet you can paste into ``src/commonlid/datasets/nano.py``

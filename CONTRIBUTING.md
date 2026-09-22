@@ -17,13 +17,14 @@ in a `Makefile` so local dev and CI run identical commands.
 ```bash
 git clone https://github.com/commoncrawl/commonlid-eval.git
 cd commonlid-eval
-make install        # uv sync --extra dev (ruff + mypy + pytest + DSPy + Azure + cld3-py + gradio)
+make install        # uv sync (installs the `dev` dependency group by default)
 ```
 
-The `dev` extra pulls in `dspy` and `azure-identity` so the DSPy test
-paths execute against mocked transports rather than skipping. It also
-pulls in `cld3-py` and `gradio` so every shipped wrapper can be
-exercised by the test suite.
+The `dev` group (PEP 735, `[dependency-groups]` in `pyproject.toml`)
+holds ruff, mypy and pytest plus the project's own `llm`, `cld3`,
+`google-translate` and `leaderboard` extras, so the test suite exercises
+those wrappers against mocked transports with the exact same pins users
+install. It is not an extra, so it never appears in the published wheel.
 
 For notebook work add the `notebooks` extra:
 

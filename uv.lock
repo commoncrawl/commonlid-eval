@@ -858,9 +858,15 @@ afrolid = [
 all = [
     { name = "azure-identity" },
     { name = "botocore" },
+    { name = "cld3-py" },
     { name = "dspy" },
     { name = "fsspec" },
     { name = "google-cloud-translate" },
+    { name = "gradio" },
+    { name = "jupyterlab" },
+    { name = "langid" },
+    { name = "matplotlib" },
+    { name = "nbclient" },
     { name = "protobuf" },
     { name = "sentencepiece" },
     { name = "torch" },
@@ -871,21 +877,6 @@ cld3 = [
 ]
 commonlingua = [
     { name = "torch" },
-]
-dev = [
-    { name = "azure-identity" },
-    { name = "botocore" },
-    { name = "cld3-py" },
-    { name = "dspy" },
-    { name = "fsspec" },
-    { name = "google-cloud-translate" },
-    { name = "gradio" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "types-regex" },
-    { name = "types-tqdm" },
 ]
 google-translate = [
     { name = "google-cloud-translate" },
@@ -906,41 +897,41 @@ notebooks = [
     { name = "nbclient" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "commonlid", extra = ["cld3", "google-translate", "leaderboard", "llm"] },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "types-regex" },
+    { name = "types-tqdm" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "azure-identity", marker = "extra == 'dev'", specifier = ">=1.17" },
     { name = "azure-identity", marker = "extra == 'llm'", specifier = ">=1.17" },
-    { name = "botocore", marker = "extra == 'dev'", specifier = ">=1.35" },
     { name = "botocore", marker = "extra == 'llm'", specifier = ">=1.35" },
     { name = "cld3-py", marker = "extra == 'cld3'", specifier = ">=3.1" },
-    { name = "cld3-py", marker = "extra == 'dev'", specifier = ">=3.1" },
-    { name = "commonlid", extras = ["afrolid", "llm", "commonlingua", "google-translate"], marker = "extra == 'all'" },
+    { name = "commonlid", extras = ["afrolid", "cld3", "commonlingua", "google-translate", "leaderboard", "llm", "notebooks"], marker = "extra == 'all'" },
     { name = "datasets", specifier = ">=3.1.0" },
-    { name = "dspy", marker = "extra == 'dev'", specifier = ">=2.5" },
     { name = "dspy", marker = "extra == 'llm'", specifier = ">=2.5" },
     { name = "fasttext-predict", specifier = ">=0.9.2" },
-    { name = "fsspec", marker = "extra == 'dev'", specifier = ">=2024.6" },
     { name = "fsspec", marker = "extra == 'llm'", specifier = ">=2024.6" },
-    { name = "google-cloud-translate", marker = "extra == 'dev'", specifier = ">=3.16" },
     { name = "google-cloud-translate", marker = "extra == 'google-translate'", specifier = ">=3.16" },
-    { name = "gradio", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "gradio", marker = "extra == 'leaderboard'", specifier = ">=5" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "iso639-lang", specifier = "==2.5.1" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4.3" },
     { name = "langid", marker = "extra == 'notebooks'", specifier = ">=1.1.6" },
     { name = "matplotlib", marker = "extra == 'notebooks'", specifier = ">=3.9" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "nbclient", marker = "extra == 'notebooks'", specifier = ">=0.10" },
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "protobuf", marker = "extra == 'afrolid'", specifier = ">=4.25" },
     { name = "pycld2", specifier = ">=0.42" },
     { name = "pyfranc", specifier = ">=0.2.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "regex", specifier = ">=2024.11.6" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "sentencepiece", marker = "extra == 'afrolid'", specifier = ">=0.2" },
     { name = "torch", marker = "extra == 'afrolid'", specifier = ">=2.4" },
@@ -948,10 +939,19 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67" },
     { name = "transformers", marker = "extra == 'afrolid'", specifier = ">=4.46,<5" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "types-regex", marker = "extra == 'dev'" },
-    { name = "types-tqdm", marker = "extra == 'dev'" },
 ]
-provides-extras = ["afrolid", "llm", "cld3", "google-translate", "commonlingua", "leaderboard", "dev", "notebooks", "all"]
+provides-extras = ["afrolid", "llm", "cld3", "google-translate", "commonlingua", "leaderboard", "notebooks", "all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "commonlid", extras = ["llm", "cld3", "google-translate", "leaderboard"] },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "types-regex" },
+    { name = "types-tqdm" },
+]
 
 [[package]]
 name = "contourpy"
