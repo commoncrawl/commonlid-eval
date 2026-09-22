@@ -195,14 +195,43 @@ def test_header_links_to_blog_and_paper(tmp_path: Path) -> None:
     text = "\n".join(markdown_values)
     assert app_module.BLOG_URL in text
     assert app_module.PAPER_URL in text
+    assert app_module.GITHUB_URL in text
+    # External links must open in a new tab: same-tab navigation is blocked
+    # when the app is embedded in the HF Space iframe.
+    for url in (
+        app_module.WEBSITE_URL,
+        app_module.BLOG_URL,
+        app_module.PAPER_URL,
+        app_module.GITHUB_URL,
+        app_module.NEW_MODEL_URL,
+    ):
+        assert f'<a href="{url}" target="_blank" rel="noopener noreferrer">' in text
     # Footer links to the HF dataset page (lives in its own Markdown block).
     assert any(
-        "huggingface.co/datasets/some-org/some-results" in v and "Source:" in v
+        "huggingface.co/datasets/some-org/some-results" in v
+        and "Source:" in v
+        and 'target="_blank"' in v
         for v in markdown_values
     )
     # The constants point at the real docs.
     assert "commoncrawl.org/blog/commonlid" in app_module.BLOG_URL
     assert "arxiv.org/abs/2601.18026" in app_module.PAPER_URL
+
+
+def test_header_html_inlines_light_and_dark_logo() -> None:
+    """The header embeds both logo variants as data URIs and swaps them via ``.dark``."""
+    pytest.importorskip("gradio")
+    from commonlid.leaderboard.app import _HEADER_CSS, _header_html
+
+    html = _header_html()
+    assert html.count("data:image/svg+xml;base64,") == 2
+    assert 'class="commonlid-logo commonlid-logo--light"' in html
+    assert 'class="commonlid-logo commonlid-logo--dark"' in html
+    # Gradio nests css_template under the component id, so the body-level
+    # ``.dark`` class must be referenced via ``.dark &``.
+    assert ".commonlid-logo--dark { display: none; }" in _HEADER_CSS
+    assert ".dark & .commonlid-logo--light { display: none; }" in _HEADER_CSS
+    assert ".dark & .commonlid-logo--dark { display: block; }" in _HEADER_CSS
 
 
 def test_dataset_metadata_markdown_uses_registry() -> None:
@@ -212,7 +241,10 @@ def test_dataset_metadata_markdown_uses_registry() -> None:
     md = _dataset_metadata_markdown("commonlid")
     assert "CommonLID" in md
     # License is rendered as ``License: `<name>`` and linked to license_url.
-    assert "License: [`common-crawl-tou`](https://commoncrawl.org/terms-of-use)" in md
+    assert (
+        'License: <a href="https://commoncrawl.org/terms-of-use" target="_blank" '
+        'rel="noopener noreferrer"><code>common-crawl-tou</code></a>'
+    ) in md
     assert "Reference" in md
     assert "Main score: `macro_f1`" in md
     assert _tab_label("commonlid") == "CommonLID"

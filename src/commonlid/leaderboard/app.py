@@ -12,6 +12,7 @@ optional extra; importing this module without them raises ``ImportError``.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -42,7 +43,11 @@ BLOG_URL = (
 )
 PAPER_URL = "https://arxiv.org/abs/2601.18026"
 
+GITHUB_URL = "https://github.com/commoncrawl/commonlid-eval/"
+
 WEBSITE_URL = "https://commonlid.org/"
+
+_IMAGES_DIR = Path(__file__).parent / "images"
 
 NEW_MODEL_URL = (
     "https://github.com/commoncrawl/commonlid-eval/blob/main/docs/contributing/adding_a_model.md"
@@ -434,6 +439,53 @@ def _snapshot_root(
     )
 
 
+def _logo_data_uri(filename: str) -> str:
+    """Inline an SVG from the packaged ``images/`` dir as a base64 data URI.
+
+    Inlining sidesteps Gradio's static-file allowlist so the logo works both
+    locally and in the HF Space without extra ``allowed_paths`` wiring.
+    """
+    svg = (_IMAGES_DIR / filename).read_bytes()
+    return "data:image/svg+xml;base64," + base64.b64encode(svg).decode("ascii")
+
+
+# Scoped CSS for the header block. Gradio wraps ``css_template`` as
+# ``#<component-id> { ... }`` (CSS nesting), so ``.dark &`` resolves to
+# ``.dark #<id>`` and picks up the ``dark`` class Gradio toggles on ``<body>``.
+_HEADER_CSS = """
+.commonlid-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 4px 0 8px; }
+.commonlid-header h1 { margin: 0; font-size: 1.75rem; font-weight: 600; }
+.commonlid-logo { height: 44px; width: auto; display: block; }
+.commonlid-logo--dark { display: none; }
+.dark & .commonlid-logo--light { display: none; }
+.dark & .commonlid-logo--dark { display: block; }
+"""
+
+
+def _header_html() -> str:
+    """Logo + title row; both logo variants are inlined and swapped by ``_HEADER_CSS``."""
+    light = _logo_data_uri("commonlid-logo.svg")
+    dark = _logo_data_uri("commonlid-logo-dark.svg")
+    return (
+        '<div class="commonlid-header">'
+        f'<img class="commonlid-logo commonlid-logo--light" src="{light}" alt="CommonLID">'
+        f'<img class="commonlid-logo commonlid-logo--dark" src="{dark}" alt="CommonLID">'
+        "<h1>Leaderboard</h1>"
+        "</div>"
+    )
+
+
+def _ext_link(label: str, url: str) -> str:
+    """Render an external link as raw HTML that opens in a new tab.
+
+    Plain Markdown links render as same-tab navigations; when the leaderboard
+    is embedded in the Hugging Face Space iframe the browser blocks those, so
+    every outbound link needs ``target="_blank"``. Gradio's Markdown sanitizer
+    keeps ``target`` and ``rel`` on anchors.
+    """
+    return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+
+
 def _tab_label(dataset_id: str) -> str:
     """Human-friendly tab title; falls back to the raw dataset_id."""
     try:
@@ -466,7 +518,7 @@ def _dataset_metadata_markdown(dataset_id: str) -> str:
         parts.append(cls.description)
     meta_bits: list[str] = []
     if cls.reference_url:
-        meta_bits.append(f"[Reference]({cls.reference_url})")
+        meta_bits.append(_ext_link("Reference", cls.reference_url))
     license_bit = _format_license(cls.license_name, cls.license_url)
     if license_bit:
         meta_bits.append(license_bit)
@@ -480,7 +532,7 @@ def _format_license(license_name: str, license_url: str | None) -> str:
     if not license_name:
         return ""
     if license_url:
-        return f"License: [`{license_name}`]({license_url})"
+        return f"License: {_ext_link(f'<code>{license_name}</code>', license_url)}"
     return f"License: `{license_name}`"
 
 
@@ -556,19 +608,25 @@ def build_app(
 
     revision_label = revision[:12] if revision else "HEAD"
     header = (
-        f"# CommonLID Leaderboard\n"
-        f"Results for the **CommonLID** and **CommonLID-nano** benchmarks. "
-        f"Headline metric: **macro F1**. Models are ranked by macro F1 "
-        f"within each tab; click a row to see per-language metrics.\n"
-        f"\n"
-        f"🌐 [Website]({WEBSITE_URL})  •  📝 [Blog post]({BLOG_URL})  •  📄 [Paper]({PAPER_URL})  •  🆕 [Add a model]({NEW_MODEL_URL})"
+        "Results for the **CommonLID** and **CommonLID-nano** benchmarks. "
+        "Headline metric: **macro F1**. Models are ranked by macro F1 "
+        "within each tab; click a row to see per-language metrics.\n"
+        "\n"
+        + "  •  ".join([
+            "🌐 " + _ext_link("Website", WEBSITE_URL),
+            "📝 " + _ext_link("Blog post", BLOG_URL),
+            "📄 " + _ext_link("Paper", PAPER_URL),
+            "🐙 " + _ext_link("GitHub", GITHUB_URL),
+            "🆕 " + _ext_link("Add a model", NEW_MODEL_URL),
+        ])
     )
     repo_url = f"https://huggingface.co/datasets/{repo_id}"
     if revision:
         repo_url += f"/tree/{revision}"
-    footer = f"_Source: [`{repo_id}`]({repo_url}) @ `{revision_label}`._"
+    footer = f"_Source: {_ext_link(f'<code>{repo_id}</code>', repo_url)} @ `{revision_label}`._"
 
     with gr.Blocks(title="CommonLID Leaderboard") as demo:
+        gr.HTML(_header_html(), css_template=_HEADER_CSS)
         gr.Markdown(header)
         with gr.Tabs():
             for dataset_id in VISIBLE_DATASETS:
