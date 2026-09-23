@@ -18,6 +18,7 @@ from commonlid.models import glotlid as _glotlid  # noqa: F401
 from commonlid.models import google_translate_v2 as _google_translate_v2  # noqa: F401
 from commonlid.models import google_translate_v3 as _google_translate_v3  # noqa: F401
 from commonlid.models import openlidv2 as _openlidv2  # noqa: F401
+from commonlid.models import py3langid as _py3langid  # noqa: F401
 from commonlid.models import pyfranc as _pyfranc  # noqa: F401
 from commonlid.models.dspy_llm import DSPyLLMModel
 

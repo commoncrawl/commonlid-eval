@@ -69,6 +69,7 @@ commonlingua = [
     # transformers stack that [afrolid] pulls in.
     "torch>=2.4",
 ]
+py3langid = ["py3langid>=0.4"]
 leaderboard = [
     # gradio 4.x imports HfFolder from huggingface_hub, which was removed in
     # huggingface-hub 1.0; gradio 5 dropped that import.
@@ -82,7 +83,7 @@ notebooks = [
 ]
 all = [
     # Every optional extra: models, the leaderboard app and the notebooks.
-    "commonlid[afrolid,cld3,commonlingua,google-translate,leaderboard,llm,notebooks]",
+    "commonlid[afrolid,cld3,commonlingua,google-translate,leaderboard,llm,notebooks,py3langid]",
 ]
 
 # PEP 735 dependency groups: dev-only, never published in the wheel metadata.
@@ -93,7 +94,7 @@ dev = [
     # in the published extras instead of re-listing their pins. afrolid and
     # commonlingua (torch) stay out: they are covered by mocked unit tests
     # and excluded from coverage, see [tool.coverage.run].
-    "commonlid[llm,cld3,google-translate,leaderboard]",
+    "commonlid[llm,cld3,google-translate,leaderboard,py3langid]",
     "ruff>=0.6",
     "mypy>=1.11",
     "pytest>=8",
@@ -182,6 +183,7 @@ module = [
     "fasttext.*",
     "pycld2.*",
     "pyfranc.*",
+    "py3langid.*",
     "iso639.*",
     "datasets.*",
     "huggingface_hub.*",
