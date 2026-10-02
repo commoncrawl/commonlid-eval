@@ -185,8 +185,9 @@ Each meter has a source, which tells you how much to trust it:
 | `calibrated` | Measured with `--calibrate N`, which predicts N random samples **for real** and replaces the assumptions with the mean and a 95% confidence interval. This costs money on paid APIs, and LLMs then need the same `--api-base`/auth flags as `run`. |
 
 Prices come from rate cards with an "as of" date and a source URL. LLM token
-prices come from LiteLLM's model map. Google and hardware prices are built
-in (`commonlid list-rate-cards`). Use `--hourly-rate USD` for hardware not
+prices come from LiteLLM's model map. Other paid APIs declare their price
+on the model class (`pricing`), and hardware prices are built in. `commonlid
+list-rate-cards` lists both. Use `--hourly-rate USD` for hardware not
 in that list, and `--rate METER=USD_PER_UNIT` to override any price. Rates
 are linear list prices: free tiers and volume discounts are not modelled.
 Prediction caches are ignored too, so the estimate is for a run from scratch.

@@ -18,7 +18,7 @@ from commonlid.cost import (
     RateCard,
     estimate_cost,
     format_estimate,
-    get_rate_card,
+    get_hardware_card,
     hourly_rate_card,
     litellm_rate_card,
 )
@@ -131,11 +131,19 @@ def test_add_usage_accumulates() -> None:
 # --- rate cards ----------------------------------------------------------------
 
 
-def test_builtin_cards() -> None:
-    assert get_rate_card("google-translate-v2").rates["characters"] == pytest.approx(20e-6)
-    assert get_rate_card("aws:g5.xlarge").rates["instance_hours"] == pytest.approx(1.006)
-    with pytest.raises(KeyError, match="known cards"):
-        get_rate_card("nope")
+def test_hardware_cards() -> None:
+    assert get_hardware_card("aws:g5.xlarge").rates["instance_hours"] == pytest.approx(1.006)
+    with pytest.raises(KeyError, match="known hardware"):
+        get_hardware_card("nope")
+
+
+def test_rate_card_defaults_to_class_pricing() -> None:
+    assert LocalModel().rate_card() is None
+
+    class Priced(LocalModel):
+        pricing = RateCard("priced", {"characters": 1.0})
+
+    assert Priced().rate_card() is Priced.pricing
 
 
 def test_hourly_rate_card() -> None:
@@ -312,7 +320,7 @@ def test_format_and_to_dict() -> None:
 
 
 def test_format_small_rates_and_costs() -> None:
-    card = get_rate_card("google-translate-v2")
+    card = RateCard("per-million", {"characters": 20e-6})
     model = MeteredModel()
     model.rate_card = lambda: card  # type: ignore[method-assign]
     text = format_estimate(estimate_cost(model, StubDataset()))

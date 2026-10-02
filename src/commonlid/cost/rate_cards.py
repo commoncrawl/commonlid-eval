@@ -1,8 +1,10 @@
 """Rate cards: what a provider charges per unit of each usage meter.
 
 Prices drift, so every card carries the date it was checked and the page it
-came from. LLM token prices are not listed here; they are read from LiteLLM's
-model map (:func:`litellm_rate_card`), which is maintained upstream.
+came from. LLM token prices are read from LiteLLM's model map (:func:`litellm_rate_card`), which is
+maintained upstream. A paid API's own price list lives on its model class as
+:attr:`LIDModel.pricing`; this module holds what is shared: the hardware a
+self-hosted model can run on.
 
 Rates are linear USD per unit. Free tiers, volume tiers and committed-use
 discounts are deliberately not modelled: the estimate is an upper-end budget
@@ -16,7 +18,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from commonlid.cost.usage import (
-    CHARACTERS,
     INPUT_TOKENS,
     INSTANCE_HOURS,
     OUTPUT_TOKENS,
@@ -47,7 +48,6 @@ class RateCard:
         )
 
 
-_GOOGLE_TRANSLATE_SOURCE = "https://cloud.google.com/translate/pricing"
 _HF_ENDPOINTS_SOURCE = "https://huggingface.co/docs/inference-endpoints/pricing"
 _AWS_EC2_SOURCE = "https://aws.amazon.com/ec2/pricing/on-demand/"
 
@@ -61,25 +61,6 @@ def _hourly(card_id: str, usd_per_hour: float, *, source: str, note: str) -> Rat
         notes=(note,),
     )
 
-
-# Language detection costs the same on both editions, and v3's one request per
-# text is not billed separately: only characters are.
-_API_CARDS: dict[str, RateCard] = {
-    "google-translate-v2": RateCard(
-        card_id="google-translate-v2",
-        rates={CHARACTERS: 20.0 / 1_000_000},
-        as_of="2026-10-02",
-        source=_GOOGLE_TRANSLATE_SOURCE,
-        notes=("Basic edition language detection",),
-    ),
-    "google-translate-v3": RateCard(
-        card_id="google-translate-v3",
-        rates={CHARACTERS: 20.0 / 1_000_000},
-        as_of="2026-10-02",
-        source=_GOOGLE_TRANSLATE_SOURCE,
-        notes=("Advanced edition language detection",),
-    ),
-}
 
 # Hardware a self-hosted model can run on, billed per instance hour whether
 # busy or idle. EC2 prices are on-demand in us-east-1.
@@ -96,16 +77,14 @@ HARDWARE_CARDS: dict[str, RateCard] = {
     )
 }
 
-RATE_CARDS: dict[str, RateCard] = {**_API_CARDS, **HARDWARE_CARDS}
 
-
-def get_rate_card(card_id: str) -> RateCard:
-    """Look up a built-in rate card by id."""
+def get_hardware_card(card_id: str) -> RateCard:
+    """Look up a built-in hardware card by id."""
     try:
-        return RATE_CARDS[card_id]
+        return HARDWARE_CARDS[card_id]
     except KeyError:
-        known = ", ".join(sorted(RATE_CARDS))
-        msg = f"unknown rate card {card_id!r}; known cards: {known}"
+        known = ", ".join(sorted(HARDWARE_CARDS))
+        msg = f"unknown hardware {card_id!r}; known hardware: {known}"
         raise KeyError(msg) from None
 
 

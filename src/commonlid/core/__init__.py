@@ -5,6 +5,7 @@ from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import (
     get_dataset,
     get_model,
+    get_model_class,
     list_datasets,
     list_models,
     register_dataset,
@@ -17,6 +18,7 @@ __all__ = [
     "LIDPrediction",
     "get_dataset",
     "get_model",
+    "get_model_class",
     "list_datasets",
     "list_models",
     "register_dataset",

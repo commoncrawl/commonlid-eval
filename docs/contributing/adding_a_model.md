@@ -64,11 +64,18 @@ what each shipped model does.
 
 ### Reporting what a call costs
 
-Models billed per call implement three optional hooks, so that
-`commonlid estimate-cost` can budget a run before it starts:
+Models billed per call declare their price list and implement two optional
+hooks, so that `commonlid estimate-cost` can budget a run before it starts:
 
 ```python
-from commonlid.cost import Range, RateCard, get_rate_card
+from commonlid.cost import Range, RateCard
+
+    pricing = RateCard(
+        card_id="my-api",
+        rates={"characters": 20.0 / 1_000_000},  # USD per unit
+        as_of="2026-10-02",
+        source="https://example.com/pricing",
+    )
 
     def _estimate_usage(self, texts: Sequence[str]) -> dict[str, float]:
         # Billable usage of these (already preprocessed) texts, counted offline.
@@ -77,15 +84,15 @@ from commonlid.cost import Range, RateCard, get_rate_card
     def usage_assumptions(self) -> dict[str, Range]:
         # Per-sample usage that can't be counted offline, as low/expected/high.
         return {"output_tokens": Range(12, 16, 32)}
-
-    def rate_card(self) -> RateCard | None:
-        return get_rate_card("google-translate-v2")
 ```
+
+When the price depends on the instance, as for LLMs priced by model name,
+override `rate_card()` instead of setting `pricing`.
 
 To support `--calibrate`, override `measure_usage(texts)` as well. It should
 predict `texts` for real and return the usage the API reported for each
-request. Add new price lists to `src/commonlid/cost/rate_cards.py`, with an
-`as_of` date and a source URL. Local models need none of this: their cost
+request. Always give `pricing` an `as_of` date and a source URL, since prices
+drift. Local models need none of this: their cost
 is compute time, which `--hardware` and `--throughput` cover.
 
 ### Adding model dependencies

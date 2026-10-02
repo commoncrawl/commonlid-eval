@@ -266,4 +266,6 @@ def test_estimate_usage_counts_sent_characters() -> None:
 
 
 def test_rate_card_is_advanced_edition() -> None:
-    assert GoogleTranslateV3Model(project_id="p").rate_card().card_id == "google-translate-v3"
+    card = GoogleTranslateV3Model(project_id="p").rate_card()
+    assert card is GoogleTranslateV3Model.pricing
+    assert card.card_id == "google-translate-v3"

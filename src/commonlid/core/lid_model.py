@@ -43,6 +43,9 @@ class LIDModel(ABC):
     # it per-instance, so it is not marked ``ClassVar``.
     model_id: str
     supported_languages: ClassVar[frozenset[str] | None] = None
+    # What one call costs, for models billed per call (paid APIs). ``None``
+    # for local models, whose cost is compute time.
+    pricing: ClassVar[RateCard | None] = None
     requires_preprocessing: ClassVar[bool] = True
     default_batch_size: ClassVar[int] = 64
 
@@ -113,8 +116,12 @@ class LIDModel(ABC):
         return {}
 
     def rate_card(self) -> RateCard | None:
-        """The price list this model is billed under, or ``None`` if it has none."""
-        return None
+        """The price list this model is billed under, or ``None`` if it has none.
+
+        Defaults to :attr:`pricing`; override it when the price depends on
+        the instance, as for LLMs priced by model name.
+        """
+        return self.pricing
 
     def measure_usage(self, texts: Sequence[str]) -> list[Usage] | None:
         """Predict ``texts`` for real and return the usage of each billed request.

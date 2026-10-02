@@ -20,6 +20,7 @@ from commonlid import __version__
 from commonlid.core.registry import (
     get_dataset,
     get_model,
+    get_model_class,
     list_datasets,
     list_models,
 )
@@ -284,7 +285,7 @@ def estimate_cost_cmd(
         Range,
         estimate_cost,
         format_estimate,
-        get_rate_card,
+        get_hardware_card,
         hourly_rate_card,
     )
 
@@ -293,7 +294,7 @@ def estimate_cost_cmd(
         raise typer.BadParameter(msg)
     try:
         hardware_card = (
-            get_rate_card(hardware)
+            get_hardware_card(hardware)
             if hardware is not None
             else hourly_rate_card(hourly_rate)
             if hourly_rate is not None
@@ -348,9 +349,18 @@ def estimate_cost_cmd(
 def list_rate_cards_cmd(
     as_json: Annotated[bool, typer.Option("--json", help="Output JSON instead of text.")] = False,
 ) -> None:
-    """List the built-in rate cards (API pricing and hardware)."""
-    from commonlid.cost import RATE_CARDS
+    """List the built-in rate cards: each paid model's pricing, then hardware.
 
+    LLM token prices are not listed; they come from LiteLLM's model map.
+    """
+    from commonlid.cost import HARDWARE_CARDS
+
+    cards = {
+        card.card_id: card
+        for card in (get_model_class(model_id).pricing for model_id in list_models())
+        if card is not None
+    }
+    cards.update(HARDWARE_CARDS)
     if as_json:
         typer.echo(
             json.dumps({
@@ -360,11 +370,11 @@ def list_rate_cards_cmd(
                     "source": card.source,
                     "notes": list(card.notes),
                 }
-                for card_id, card in RATE_CARDS.items()
+                for card_id, card in cards.items()
             })
         )
         return
-    for card_id, card in RATE_CARDS.items():
+    for card_id, card in cards.items():
         rates = ", ".join(f"{meter}={usd:.4g}" for meter, usd in card.rates.items())
         typer.echo(f"{card_id}: {rates} USD/unit ({'; '.join(card.notes)}, as of {card.as_of})")
 

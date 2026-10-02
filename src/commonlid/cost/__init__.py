@@ -3,9 +3,8 @@
 from commonlid.cost.estimate import CostEstimate, MeterEstimate, estimate_cost, format_estimate
 from commonlid.cost.rate_cards import (
     HARDWARE_CARDS,
-    RATE_CARDS,
     RateCard,
-    get_rate_card,
+    get_hardware_card,
     hourly_rate_card,
     litellm_rate_card,
 )
@@ -13,7 +12,6 @@ from commonlid.cost.usage import Range, Usage
 
 __all__ = [
     "HARDWARE_CARDS",
-    "RATE_CARDS",
     "CostEstimate",
     "MeterEstimate",
     "Range",
@@ -21,7 +19,7 @@ __all__ = [
     "Usage",
     "estimate_cost",
     "format_estimate",
-    "get_rate_card",
+    "get_hardware_card",
     "hourly_rate_card",
     "litellm_rate_card",
 ]

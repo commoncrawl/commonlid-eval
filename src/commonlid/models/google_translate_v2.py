@@ -31,7 +31,7 @@ from typing import Any, ClassVar
 
 from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
-from commonlid.cost.rate_cards import RateCard, get_rate_card
+from commonlid.cost.rate_cards import RateCard
 from commonlid.cost.usage import CHARACTERS, Usage
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,15 @@ class GoogleTranslateV2Model(LIDModel):
     """Google Cloud Translation Basic (v2) ``detect`` as a LID model."""
 
     model_id = "GoogleTranslate-v2"
+    # Language detection is billed per character sent, at the same price on
+    # both editions; v3's one request per text is not billed separately.
+    pricing = RateCard(
+        card_id="google-translate-v2",
+        rates={CHARACTERS: 20.0 / 1_000_000},
+        as_of="2026-10-02",
+        source="https://cloud.google.com/translate/pricing",
+        notes=("Basic edition language detection",),
+    )
 
     # A v2 request is capped at 100K bytes of payload. Chunk well under that,
     # and cap the segment count too — the API rejects very long `q` lists.
@@ -195,9 +204,6 @@ class GoogleTranslateV2Model(LIDModel):
         # clipped exactly as `_predict_batch` does.
         sent = (t.strip()[: self._MAX_CHARS_PER_TEXT] for t in texts)
         return {CHARACTERS: float(sum(len(t) for t in sent))}
-
-    def rate_card(self) -> RateCard:
-        return get_rate_card("google-translate-v2")
 
     def discover_supported_languages(self) -> frozenset[str]:
         """Ask the API which languages it supports, as ISO 639-3."""
