@@ -62,6 +62,32 @@ pass a real confidence: a constant, or a number on an unbounded scale, is
 worse than `None` because it reads like one. See the table in the README for
 what each shipped model does.
 
+### Reporting what a call costs
+
+Models billed per call implement three optional hooks, so that
+`commonlid estimate-cost` can budget a run before it starts:
+
+```python
+from commonlid.cost import Range, RateCard, get_rate_card
+
+    def _estimate_usage(self, texts: Sequence[str]) -> dict[str, float]:
+        # Billable usage of these (already preprocessed) texts, counted offline.
+        return {"characters": float(sum(len(t) for t in texts))}
+
+    def usage_assumptions(self) -> dict[str, Range]:
+        # Per-sample usage that can't be counted offline, as low/expected/high.
+        return {"output_tokens": Range(12, 16, 32)}
+
+    def rate_card(self) -> RateCard | None:
+        return get_rate_card("google-translate-v2")
+```
+
+To support `--calibrate`, override `measure_usage(texts)` as well. It should
+predict `texts` for real and return the usage the API reported for each
+request. Add new price lists to `src/commonlid/cost/rate_cards.py`, with an
+`as_of` date and a source URL. Local models need none of this: their cost
+is compute time, which `--hardware` and `--throughput` cover.
+
 ### Adding model dependencies
 
 If you are adding a model that requires additional dependencies, you can add them to the `pyproject.toml` file, under optional dependencies:

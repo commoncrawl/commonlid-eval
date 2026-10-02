@@ -163,20 +163,210 @@ def run(
     ).run()
 
 
-def _resolve_model_spec(spec: str, llm_kwargs: dict[str, Any]) -> Any:
-    """Resolve a CLI --model spec to a loaded :class:`LIDModel` instance."""
+def _resolve_model_spec(
+    spec: str, llm_kwargs: dict[str, Any], *, require_api_base: bool = True
+) -> Any:
+    """Resolve a CLI --model spec to a loaded :class:`LIDModel` instance.
+
+    ``require_api_base=False`` builds a DSPy model that is never called, as
+    for offline cost estimates.
+    """
     if spec.startswith(DSPY_SPEC_PREFIX):
         llm_model_name = spec.removeprefix(DSPY_SPEC_PREFIX)
         if not llm_model_name:
             msg = "'dspy:' model spec requires a model name, e.g. 'dspy:azure/gpt-4o-mini'"
             raise typer.BadParameter(msg)
-        if not llm_kwargs.get("api_base"):
+        if require_api_base and not llm_kwargs.get("api_base"):
             msg = "DSPy LLM models require --api-base (e.g. your Azure endpoint URL)"
             raise typer.BadParameter(msg)
         from commonlid.models.dspy_llm import DSPyLLMModel
 
-        return DSPyLLMModel(llm_model_name=llm_model_name, **llm_kwargs)
+        return DSPyLLMModel(
+            llm_model_name=llm_model_name,
+            **{**llm_kwargs, "api_base": llm_kwargs["api_base"] or ""},
+        )
     return get_model(spec)
+
+
+def _parse_meter_options(values: list[str] | None, option: str, parse: Any) -> dict[str, Any]:
+    """Parse repeated ``METER=VALUE`` options."""
+    parsed: dict[str, Any] = {}
+    for item in values or []:
+        meter, sep, value = item.partition("=")
+        if not sep or not meter:
+            msg = f"{option} expects METER=VALUE, got {item!r}"
+            raise typer.BadParameter(msg)
+        try:
+            parsed[meter] = parse(value)
+        except ValueError as exc:
+            msg = f"{option} {item!r}: {exc}"
+            raise typer.BadParameter(msg) from exc
+    return parsed
+
+
+@app.command("estimate-cost")
+def estimate_cost_cmd(
+    model: Annotated[
+        list[str],
+        typer.Option(
+            "--model",
+            "-m",
+            help="Model id or 'dspy:<llm-model-name>' (repeat to add more).",
+        ),
+    ],
+    dataset: Annotated[
+        list[str], typer.Option("--dataset", "-d", help="Dataset id (repeat to add more).")
+    ],
+    assume: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--assume",
+            help=(
+                "Per-sample usage for a meter, as METER=VALUE or METER=LOW:EXPECTED:HIGH "
+                "(e.g. reasoning_tokens=0:200:1000). Repeatable."
+            ),
+        ),
+    ] = None,
+    rate: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--rate",
+            help="Override the price of a meter, as METER=USD_PER_UNIT. Repeatable.",
+        ),
+    ] = None,
+    hardware: Annotated[
+        str | None,
+        typer.Option(
+            "--hardware",
+            help="Price compute time on this hardware card (see `list-rate-cards`).",
+        ),
+    ] = None,
+    hourly_rate: Annotated[
+        float | None,
+        typer.Option("--hourly-rate", help="Price compute time at this USD/hour."),
+    ] = None,
+    throughput: Annotated[
+        str | None,
+        typer.Option(
+            "--throughput",
+            help="Samples/second on the hardware, as VALUE or LOW:EXPECTED:HIGH.",
+        ),
+    ] = None,
+    calibrate: Annotated[
+        int,
+        typer.Option(
+            "--calibrate",
+            help=(
+                "Predict N random samples for real and use the measured usage or "
+                "throughput instead of assumptions. Costs money on paid APIs."
+            ),
+        ),
+    ] = 0,
+    seed: Annotated[int, typer.Option("--seed", help="Seed for --calibrate sampling.")] = 0,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = 64,
+    as_json: Annotated[bool, typer.Option("--json", help="Output JSON instead of text.")] = False,
+    # --- DSPy LLM flags, only needed with --calibrate ---
+    api_base: Annotated[str | None, typer.Option("--api-base")] = None,
+    api_version: Annotated[str | None, typer.Option("--api-version")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key")] = None,
+    azure_ad_token: Annotated[bool, typer.Option("--azure-ad-token")] = False,
+    max_completion_tokens: Annotated[int | None, typer.Option("--max-completion-tokens")] = None,
+    llm_n_threads: Annotated[int, typer.Option("--llm-n-threads")] = 1,
+) -> None:
+    """Estimate what a run would cost, as a low / expected / high range.
+
+    Billable usage that can be counted offline (characters sent, prompt
+    tokens) is counted over every sample without calling any API. What
+    cannot (generated tokens, throughput) comes from per-model defaults,
+    --assume, or a small paid --calibrate run.
+    """
+    from commonlid.cost import (
+        Range,
+        estimate_cost,
+        format_estimate,
+        get_rate_card,
+        hourly_rate_card,
+    )
+
+    if hardware is not None and hourly_rate is not None:
+        msg = "pass either --hardware or --hourly-rate, not both"
+        raise typer.BadParameter(msg)
+    try:
+        hardware_card = (
+            get_rate_card(hardware)
+            if hardware is not None
+            else hourly_rate_card(hourly_rate)
+            if hourly_rate is not None
+            else None
+        )
+        throughput_range = Range.parse(throughput) if throughput is not None else None
+    except (KeyError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    assumptions = _parse_meter_options(assume, "--assume", Range.parse)
+    rate_overrides = _parse_meter_options(rate, "--rate", float)
+
+    llm_kwargs = {
+        "api_base": api_base,
+        "api_version": api_version,
+        "api_key": api_key,
+        "azure_ad_token": azure_ad_token,
+        "max_completion_tokens": max_completion_tokens,
+        "n_threads": llm_n_threads,
+        "cache_dir": None,
+    }
+    models = [
+        _resolve_model_spec(spec, llm_kwargs, require_api_base=calibrate > 0) for spec in model
+    ]
+    estimates = []
+    for dataset_id in dataset:
+        lid_dataset = get_dataset(dataset_id)
+        for lid_model in models:
+            try:
+                estimates.append(
+                    estimate_cost(
+                        lid_model,
+                        lid_dataset,
+                        assumptions=assumptions,
+                        rate_overrides=rate_overrides,
+                        hardware=hardware_card,
+                        throughput=throughput_range,
+                        calibrate=calibrate,
+                        seed=seed,
+                        batch_size=batch_size,
+                    )
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+
+    if as_json:
+        typer.echo(json.dumps([e.to_dict() for e in estimates], indent=2))
+    else:
+        typer.echo("\n\n".join(format_estimate(e) for e in estimates))
+
+
+@app.command("list-rate-cards")
+def list_rate_cards_cmd(
+    as_json: Annotated[bool, typer.Option("--json", help="Output JSON instead of text.")] = False,
+) -> None:
+    """List the built-in rate cards (API pricing and hardware)."""
+    from commonlid.cost import RATE_CARDS
+
+    if as_json:
+        typer.echo(
+            json.dumps({
+                card_id: {
+                    "rates": dict(card.rates),
+                    "as_of": card.as_of,
+                    "source": card.source,
+                    "notes": list(card.notes),
+                }
+                for card_id, card in RATE_CARDS.items()
+            })
+        )
+        return
+    for card_id, card in RATE_CARDS.items():
+        rates = ", ".join(f"{meter}={usd:.4g}" for meter, usd in card.rates.items())
+        typer.echo(f"{card_id}: {rates} USD/unit ({'; '.join(card.notes)}, as of {card.as_of})")
 
 
 @app.command()

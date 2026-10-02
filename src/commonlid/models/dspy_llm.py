@@ -13,9 +13,17 @@ import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from commonlid.core.lid_model import LIDModel
+from commonlid.cost.rate_cards import RateCard, litellm_rate_card
+from commonlid.cost.usage import (
+    INPUT_TOKENS,
+    OUTPUT_TOKENS,
+    REASONING_TOKENS,
+    Range,
+    Usage,
+)
 
 # NOTE: :class:`DSPyLLMModel` is NOT auto-registered with ``@register_model``
 # because it requires per-instance configuration (API endpoint, model name,
@@ -27,6 +35,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_INSTRUCTION = (
     "You are a language expert. Identify the language of the input text in ISO 639-3."
 )
+
+# Fallback when no tokenizer resolves for the model: rough chars per token.
+_HEURISTIC_CHARS_PER_TOKEN = 4
+
+# Per-sample assumptions for what the model generates. The ChatAdapter answer,
+# the output field marker plus the code plus the completion marker, is ~16
+# tokens; the high end allows for chatter around it. Reasoning budgets are a
+# guess for a one-word answer and dominate the estimate for reasoning models,
+# which is what `--calibrate` is for.
+_OUTPUT_TOKENS_ASSUMPTION = Range(12, 16, 32)
+_REASONING_TOKENS_ASSUMPTION = Range(0, 256, 1024)
 
 
 def _build_signature(instruction: str) -> Any:
@@ -115,6 +134,8 @@ class DSPyLLMModel(LIDModel):
         self.n_threads = n_threads
         self.instruction = instruction
         self._module: DSPyLangIDModule | None = None
+        self._lm: Any = None
+        self._overhead_tokens: int | None = None
         # Customise the registered id when a model name is supplied so multiple
         # instantiations of this class end up under unique cache folders.
         self.model_id = f"dspy_{llm_model_name.replace('/', '_')}"
@@ -125,7 +146,8 @@ class DSPyLLMModel(LIDModel):
 
         import dspy
 
-        dspy.configure(lm=self._build_lm(), cache=False)
+        self._lm = self._build_lm()
+        dspy.configure(lm=self._lm, cache=False)
         self._module = DSPyLangIDModule(instruction=self.instruction)
         super().load()
 
@@ -165,6 +187,64 @@ class DSPyLLMModel(LIDModel):
         )
         return [self._coerce(code) for code in df["language_iso639_3"].tolist()]
 
+    def _estimate_usage(self, texts: Sequence[str]) -> Usage:
+        """Count prompt tokens with the model's own tokenizer, via LiteLLM.
+
+        Each request is the system instruction plus DSPy's chat scaffolding
+        (measured once on an empty input) plus the sample text.
+        """
+        if self._overhead_tokens is None:
+            empty = self._render_messages("")
+            counted = _count_tokens(self.llm_model_name, messages=empty)
+            if counted is None:
+                logger.warning(
+                    "No tokenizer resolved for %r; counting ~%d chars/token instead. "
+                    "Install `transformers` for Hugging Face models.",
+                    self.llm_model_name,
+                    _HEURISTIC_CHARS_PER_TOKEN,
+                )
+                counted = _heuristic_tokens("".join(str(m["content"]) for m in empty))
+            self._overhead_tokens = counted
+        total = 0
+        for text in texts:
+            counted = _count_tokens(self.llm_model_name, text=text)
+            total += self._overhead_tokens + (
+                counted if counted is not None else _heuristic_tokens(text)
+            )
+        return {INPUT_TOKENS: float(total)}
+
+    def _render_messages(self, text: str) -> list[dict[str, Any]]:
+        """The chat messages DSPy sends for one sample."""
+        import dspy
+
+        signature = _build_signature(self.instruction)
+        messages = dspy.ChatAdapter().format(signature=signature, demos=[], inputs={"text": text})
+        return cast("list[dict[str, Any]]", messages)
+
+    def usage_assumptions(self) -> dict[str, Range]:
+        assumptions = {OUTPUT_TOKENS: _OUTPUT_TOKENS_ASSUMPTION}
+        if _supports_reasoning(self.llm_model_name):
+            assumptions[REASONING_TOKENS] = _REASONING_TOKENS_ASSUMPTION
+        return assumptions
+
+    def rate_card(self) -> RateCard | None:
+        return litellm_rate_card(self.llm_model_name)
+
+    def measure_usage(self, texts: Sequence[str]) -> list[Usage]:
+        """Predict ``texts`` live and read each request's usage from the LM history."""
+        if not self._loaded:
+            self.load()
+        # A batch cache hit would skip the API and leave no history to read.
+        cache_dir, self.cache_dir = self.cache_dir, None
+        self._lm.history.clear()
+        try:
+            self.predict_scored(texts)
+        finally:
+            self.cache_dir = cache_dir
+        # DSPy caps the history at `max_history_size` entries, so a very
+        # large calibration keeps only the latest; the mean is unaffected.
+        return [_usage_from_response(entry.get("usage") or {}) for entry in self._lm.history]
+
     @staticmethod
     def _coerce(code: str | None) -> str | None:
         if code is None:
@@ -182,6 +262,52 @@ class DSPyLLMModel(LIDModel):
         ).hexdigest()[:12]
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         return self.cache_dir / f"{self.model_id}_{digest}"
+
+
+def _count_tokens(
+    model: str, *, text: str | None = None, messages: list[dict[str, Any]] | None = None
+) -> int | None:
+    """Count tokens via LiteLLM; ``None`` if no tokenizer resolves for ``model``."""
+    import litellm
+
+    try:
+        return int(litellm.token_counter(model=model, text=text, messages=messages))
+    except Exception as exc:  # LiteLLM raises assorted errors on unknown tokenizers
+        logger.debug("token_counter failed for %s (%s): %s", model, type(exc).__name__, exc)
+        return None
+
+
+def _heuristic_tokens(text: str) -> int:
+    return max(1, len(text) // _HEURISTIC_CHARS_PER_TOKEN) if text else 0
+
+
+def _supports_reasoning(model: str) -> bool:
+    import litellm
+
+    try:
+        return bool(litellm.supports_reasoning(model=model))
+    except Exception:  # unknown models raise instead of returning False
+        return False
+
+
+def _usage_from_response(usage: dict[str, Any]) -> Usage:
+    """Split a LiteLLM usage block into billable meters.
+
+    OpenAI-style ``completion_tokens`` already include reasoning tokens, so
+    they are subtracted out to avoid billing them twice.
+    """
+    details = usage.get("completion_tokens_details")
+    reasoning = (
+        details.get("reasoning_tokens")
+        if isinstance(details, dict)
+        else getattr(details, "reasoning_tokens", None)
+    ) or 0
+    completion = usage.get("completion_tokens") or 0
+    return {
+        INPUT_TOKENS: float(usage.get("prompt_tokens") or 0),
+        OUTPUT_TOKENS: float(completion - reasoning),
+        REASONING_TOKENS: float(reasoning),
+    }
 
 
 def _azure_token_provider() -> Any:

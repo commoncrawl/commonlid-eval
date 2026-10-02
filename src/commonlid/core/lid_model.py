@@ -10,6 +10,8 @@ from typing import ClassVar
 from iso639 import Lang
 from iso639.exceptions import DeprecatedLanguageValue, InvalidLanguageValue
 
+from commonlid.cost.rate_cards import RateCard
+from commonlid.cost.usage import Range, Usage
 from commonlid.preprocess import conform_langcode, openlid_normer_clean_line
 
 
@@ -88,6 +90,40 @@ class LIDModel(ABC):
         if isinstance(raw, LIDPrediction):
             return LIDPrediction(cls._conform(raw.iso639_3), raw.score)
         return LIDPrediction(cls._conform(raw), None)
+
+    def estimate_usage(self, texts: Sequence[str]) -> Usage | None:
+        """Count the billable usage of predicting ``texts``, without calling anything.
+
+        Applies the same preprocessing as :meth:`predict_scored`, since that
+        is what a metered backend actually receives. Returns ``None`` for
+        models with no per-call bill (local models, which cost compute time).
+        """
+        if self.requires_preprocessing:
+            prepared = [openlid_normer_clean_line(t) for t in texts]
+        else:
+            prepared = list(texts)
+        return self._estimate_usage(prepared)
+
+    def _estimate_usage(self, texts: Sequence[str]) -> Usage | None:  # noqa: ARG002
+        """Usage hook for metered backends; ``texts`` are already preprocessed."""
+        return None
+
+    def usage_assumptions(self) -> dict[str, Range]:
+        """Per-sample usage that cannot be counted offline, e.g. generated tokens."""
+        return {}
+
+    def rate_card(self) -> RateCard | None:
+        """The price list this model is billed under, or ``None`` if it has none."""
+        return None
+
+    def measure_usage(self, texts: Sequence[str]) -> list[Usage] | None:
+        """Predict ``texts`` for real and return the usage of each billed request.
+
+        Used to calibrate :meth:`usage_assumptions`, so it costs real money on
+        metered backends. Returns ``None`` when the backend reports no usage.
+        """
+        self.predict_scored(texts)
+        return None
 
     def supports(self, iso639_3: str) -> bool:
         """Whether the model declares support for the given ISO 639-3 language."""

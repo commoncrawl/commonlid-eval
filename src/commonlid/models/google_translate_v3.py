@@ -45,6 +45,8 @@ from typing import Any, ClassVar
 
 from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
+from commonlid.cost.rate_cards import RateCard, get_rate_card
+from commonlid.cost.usage import CHARACTERS, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,15 @@ class GoogleTranslateV3Model(LIDModel):
                 )
                 time.sleep(delay)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def _estimate_usage(self, texts: Sequence[str]) -> Usage:
+        # Billed per character of what is sent: stripped, non-blank and
+        # clipped exactly as `_predict_batch` does.
+        sent = (t.strip()[: self._MAX_CHARS_PER_TEXT] for t in texts)
+        return {CHARACTERS: float(sum(len(t) for t in sent))}
+
+    def rate_card(self) -> RateCard:
+        return get_rate_card("google-translate-v3")
 
     def discover_supported_languages(self) -> frozenset[str]:
         """Ask the API which languages it supports, as ISO 639-3."""
