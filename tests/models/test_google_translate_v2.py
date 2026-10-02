@@ -279,5 +279,5 @@ def test_rate_card_is_basic_edition() -> None:
     card = GoogleTranslateV2Model(api_key="k").rate_card
     assert card is not None
     assert card is GoogleTranslateV2Model.rate_card
-    assert card.card_id == "google-translate-v2"
+    assert card.source == "https://cloud.google.com/translate/pricing"
     assert card.rates == {"characters": pytest.approx(20e-6)}

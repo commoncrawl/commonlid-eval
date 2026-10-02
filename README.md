@@ -166,7 +166,7 @@ commonlid estimate-cost --model GlotLID --dataset commonlid \
 
 ```
 dspy_openai_gpt-5 on commonlid_nano (1,507 samples)
-Rate card: litellm:openai/gpt-5 (LiteLLM model map (litellm 1.83.0))
+Rate card: LiteLLM model map (litellm 1.83.0)
 
 meter             source   per sample     total                   rate     cost (expected, low-high)
 input_tokens      counted  298            449,693                 $1.25/M  $0.56

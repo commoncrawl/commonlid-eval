@@ -72,7 +72,6 @@ class GoogleTranslateV3Model(LIDModel):
     # Language detection is billed per character sent, at the same price on
     # both editions; v3's one request per text is not billed separately.
     rate_card = RateCard(
-        card_id="google-translate-v3",
         rates={CHARACTERS: 20.0 / 1_000_000},
         as_of="2026-10-02",
         source="https://cloud.google.com/translate/pricing",

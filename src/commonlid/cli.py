@@ -283,6 +283,7 @@ def estimate_cost_cmd(
     """
     from commonlid.cost import (
         Range,
+        RateCard,
         estimate_cost,
         format_estimate,
         get_hardware_card,
@@ -292,14 +293,13 @@ def estimate_cost_cmd(
     if hardware is not None and hourly_rate is not None:
         msg = "pass either --hardware or --hourly-rate, not both"
         raise typer.BadParameter(msg)
+    # Built-in hardware is passed by name so the estimate can say which it was.
+    hardware_spec: str | RateCard | None = hardware
+    if hourly_rate is not None:
+        hardware_spec = hourly_rate_card(hourly_rate)
     try:
-        hardware_card = (
-            get_hardware_card(hardware)
-            if hardware is not None
-            else hourly_rate_card(hourly_rate)
-            if hourly_rate is not None
-            else None
-        )
+        if hardware is not None:
+            get_hardware_card(hardware)  # fail before counting a whole dataset
         throughput_range = Range.parse(throughput) if throughput is not None else None
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -329,7 +329,7 @@ def estimate_cost_cmd(
                         lid_dataset,
                         assumptions=assumptions,
                         rate_overrides=rate_overrides,
-                        hardware=hardware_card,
+                        hardware=hardware_spec,
                         throughput=throughput_range,
                         calibrate=calibrate,
                         seed=seed,
@@ -356,27 +356,27 @@ def list_rate_cards_cmd(
     from commonlid.cost import HARDWARE_CARDS
 
     cards = {
-        card.card_id: card
-        for card in (get_model_class(model_id).rate_card for model_id in list_models())
-        if card is not None
+        model_id: card
+        for model_id in list_models()
+        if (card := get_model_class(model_id).rate_card) is not None
     }
     cards.update(HARDWARE_CARDS)
     if as_json:
         typer.echo(
             json.dumps({
-                card_id: {
+                name: {
                     "rates": dict(card.rates),
                     "as_of": card.as_of,
                     "source": card.source,
                     "notes": list(card.notes),
                 }
-                for card_id, card in cards.items()
+                for name, card in cards.items()
             })
         )
         return
-    for card_id, card in cards.items():
+    for name, card in cards.items():
         rates = ", ".join(f"{meter}={usd:.4g}" for meter, usd in card.rates.items())
-        typer.echo(f"{card_id}: {rates} USD/unit ({'; '.join(card.notes)}, as of {card.as_of})")
+        typer.echo(f"{name}: {rates} USD/unit ({'; '.join(card.notes)}, as of {card.as_of})")
 
 
 @app.command()

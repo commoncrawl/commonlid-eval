@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 class RateCard:
     """USD per unit for each meter a provider bills."""
 
-    card_id: str
     rates: Mapping[str, float]
     as_of: str | None = None
     source: str | None = None
@@ -52,9 +51,8 @@ _HF_ENDPOINTS_SOURCE = "https://huggingface.co/docs/inference-endpoints/pricing"
 _AWS_EC2_SOURCE = "https://aws.amazon.com/ec2/pricing/on-demand/"
 
 
-def _hourly(card_id: str, usd_per_hour: float, *, source: str, note: str) -> RateCard:
+def _hourly(usd_per_hour: float, *, source: str, note: str) -> RateCard:
     return RateCard(
-        card_id=card_id,
         rates={INSTANCE_HOURS: usd_per_hour},
         as_of="2026-10-02",
         source=source,
@@ -65,33 +63,29 @@ def _hourly(card_id: str, usd_per_hour: float, *, source: str, note: str) -> Rat
 # Hardware a self-hosted model can run on, billed per instance hour whether
 # busy or idle. EC2 prices are on-demand in us-east-1.
 HARDWARE_CARDS: dict[str, RateCard] = {
-    card.card_id: card
-    for card in (
-        _hourly("aws:g5.xlarge", 1.006, source=_AWS_EC2_SOURCE, note="1x NVIDIA A10G, us-east-1"),
-        _hourly("aws:g6.xlarge", 0.8048, source=_AWS_EC2_SOURCE, note="1x NVIDIA L4, us-east-1"),
-        _hourly("hf:intel-spr-x1", 0.033, source=_HF_ENDPOINTS_SOURCE, note="1 vCPU, AWS"),
-        _hourly("hf:nvidia-t4-x1", 0.50, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA T4, AWS"),
-        _hourly("hf:nvidia-l4-x1", 0.80, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA L4, AWS"),
-        _hourly("hf:nvidia-a10g-x1", 1.00, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA A10G, AWS"),
-        _hourly("hf:nvidia-a100-x1", 2.50, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA A100, AWS"),
-    )
+    "aws:g5.xlarge": _hourly(1.006, source=_AWS_EC2_SOURCE, note="1x NVIDIA A10G, us-east-1"),
+    "aws:g6.xlarge": _hourly(0.8048, source=_AWS_EC2_SOURCE, note="1x NVIDIA L4, us-east-1"),
+    "hf:intel-spr-x1": _hourly(0.033, source=_HF_ENDPOINTS_SOURCE, note="1 vCPU, AWS"),
+    "hf:nvidia-t4-x1": _hourly(0.50, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA T4, AWS"),
+    "hf:nvidia-l4-x1": _hourly(0.80, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA L4, AWS"),
+    "hf:nvidia-a10g-x1": _hourly(1.00, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA A10G, AWS"),
+    "hf:nvidia-a100-x1": _hourly(2.50, source=_HF_ENDPOINTS_SOURCE, note="1x NVIDIA A100, AWS"),
 }
 
 
-def get_hardware_card(card_id: str) -> RateCard:
-    """Look up a built-in hardware card by id."""
+def get_hardware_card(name: str) -> RateCard:
+    """Look up built-in hardware by name, e.g. ``"aws:g5.xlarge"``."""
     try:
-        return HARDWARE_CARDS[card_id]
+        return HARDWARE_CARDS[name]
     except KeyError:
         known = ", ".join(sorted(HARDWARE_CARDS))
-        msg = f"unknown hardware {card_id!r}; known hardware: {known}"
+        msg = f"unknown hardware {name!r}; known hardware: {known}"
         raise KeyError(msg) from None
 
 
 def hourly_rate_card(usd_per_hour: float) -> RateCard:
     """An ad-hoc hardware card for hardware not in :data:`HARDWARE_CARDS`."""
     return RateCard(
-        card_id=f"custom:{usd_per_hour:g}/h",
         rates={INSTANCE_HOURS: usd_per_hour},
         notes=("user-supplied hourly rate",),
     )
@@ -123,7 +117,6 @@ def litellm_rate_card(model_name: str) -> RateCard | None:
     output_rate = float(output_rate or 0.0)
     reasoning_rate = info.get("output_cost_per_reasoning_token")
     return RateCard(
-        card_id=f"litellm:{model_name}",
         rates={
             INPUT_TOKENS: float(input_rate or 0.0),
             OUTPUT_TOKENS: output_rate,

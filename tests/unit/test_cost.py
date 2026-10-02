@@ -67,7 +67,7 @@ class MeteredModel(LIDModel):
     def usage_assumptions(self) -> dict[str, Range]:
         return {"output_tokens": Range(1, 2, 4)}
 
-    rate_card = RateCard("stub-card", {"characters": 0.5, "output_tokens": 1.0})
+    rate_card = RateCard({"characters": 0.5, "output_tokens": 1.0})
 
     def measure_usage(self, texts: Sequence[str]) -> list[dict[str, float]] | None:
         self.measured_texts = list(texts)
@@ -146,7 +146,7 @@ def test_hourly_rate_card() -> None:
 
 
 def test_with_rates_overrides_and_notes() -> None:
-    card = RateCard("c", {"a": 1.0})
+    card = RateCard({"a": 1.0})
     assert card.with_rates({}) is card
     updated = card.with_rates({"a": 2.0, "b": 3.0})
     assert updated.rates == {"a": 2.0, "b": 3.0}
@@ -255,7 +255,7 @@ def test_unpriced_model_gets_a_note() -> None:
 
     est = estimate_cost(Unpriced(), StubDataset(), rate_overrides={"characters": 1.0})
     assert est.rate_card is not None
-    assert est.rate_card.card_id == "custom"
+    assert est.rate_card.notes == ("user-supplied",)
     assert est.total_cost == Range.exact(18.0)
 
 
@@ -265,10 +265,20 @@ def test_hardware_with_throughput() -> None:
     (meter,) = est.meters
     assert meter.meter == "instance_hours"
     assert meter.source == "assumed"
+    assert est.hardware == "custom"
     # 4 samples at 4 / 2 / 1 samples per second -> 1 / 2 / 4 seconds.
     total = est.total_cost
     assert total is not None
     assert (total.low, total.expected, total.high) == pytest.approx((1.0, 2.0, 4.0))
+
+
+def test_hardware_by_name() -> None:
+    est = estimate_cost(
+        LocalModel(), StubDataset(), hardware="aws:g6.xlarge", throughput=Range.exact(1)
+    )
+    assert est.hardware == "aws:g6.xlarge"
+    assert est.to_dict()["hardware"] == "aws:g6.xlarge"
+    assert est.rate_card is get_hardware_card("aws:g6.xlarge")
 
 
 def test_hardware_needs_throughput_or_calibration() -> None:
@@ -303,7 +313,7 @@ def test_format_and_to_dict() -> None:
     est = estimate_cost(MeteredModel(), StubDataset())
     text = format_estimate(est)
     assert "metered on stub (4 samples)" in text
-    assert "Rate card: stub-card" in text
+    assert est.hardware is None
     assert "Total: $17.00 ($13.00-$25.00)" in text
 
     data = est.to_dict()
@@ -313,7 +323,7 @@ def test_format_and_to_dict() -> None:
 
 
 def test_format_small_rates_and_costs() -> None:
-    card = RateCard("per-million", {"characters": 20e-6})
+    card = RateCard({"characters": 20e-6})
     model = MeteredModel()
     model.rate_card = card
     text = format_estimate(estimate_cost(model, StubDataset()))
@@ -354,6 +364,7 @@ def test_cli_estimate_cost_hardware(stub_registry: None) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "instance_hours" in result.stdout
+    assert "Rate card: aws:g5.xlarge, as of" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -392,7 +403,7 @@ def test_cli_dspy_spec_needs_api_base_only_to_calibrate(
 def test_cli_list_rate_cards() -> None:
     result = runner.invoke(app, ["list-rate-cards"])
     assert result.exit_code == 0
-    assert "google-translate-v2" in result.stdout
+    assert "GoogleTranslate-v2: characters" in result.stdout
     assert "aws:g5.xlarge" in result.stdout
 
     result = runner.invoke(app, ["list-rate-cards", "--json"])

@@ -71,7 +71,6 @@ hooks, so that `commonlid estimate-cost` can budget a run before it starts:
 from commonlid.cost import Range, RateCard
 
     rate_card = RateCard(
-        card_id="my-api",
         rates={"characters": 20.0 / 1_000_000},  # USD per unit
         as_of="2026-10-02",
         source="https://example.com/pricing",

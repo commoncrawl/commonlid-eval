@@ -63,6 +63,8 @@ class CostEstimate:
     rate_card: RateCard | None
     meters: list[MeterEstimate]
     notes: list[str] = field(default_factory=list)
+    hardware: str | None = None
+    """The hardware compute time was priced on, when it was."""
 
     @property
     def total_cost(self) -> Range | None:
@@ -81,6 +83,7 @@ class CostEstimate:
             "model_id": self.model_id,
             "dataset_id": self.dataset_id,
             "n_samples": self.n_samples,
+            "hardware": self.hardware,
             "rate_card": None if self.rate_card is None else _card_dict(self.rate_card),
             "meters": [
                 {
@@ -100,7 +103,6 @@ class CostEstimate:
 
 def _card_dict(card: RateCard) -> dict[str, Any]:
     return {
-        "card_id": card.card_id,
         "rates": dict(card.rates),
         "as_of": card.as_of,
         "source": card.source,
@@ -114,7 +116,7 @@ def estimate_cost(
     *,
     assumptions: Mapping[str, Range] | None = None,
     rate_overrides: Mapping[str, float] | None = None,
-    hardware: RateCard | None = None,
+    hardware: str | RateCard | None = None,
     throughput: Range | None = None,
     calibrate: int = 0,
     seed: int = 0,
@@ -130,7 +132,8 @@ def estimate_cost(
     rate_overrides:
         USD per unit, replacing or adding to the rate card's rates.
     hardware:
-        Price compute time on this card instead of the model's API pricing.
+        Price compute time instead of the model's API pricing, on built-in
+        hardware by name (see :data:`HARDWARE_CARDS`) or on a custom card.
         Needs ``throughput`` or ``calibrate``.
     throughput:
         Samples per second on ``hardware``.
@@ -142,7 +145,14 @@ def estimate_cost(
     n_samples = len(dataset)
     calibration_texts = _sample_texts(dataset, calibrate, seed) if calibrate > 0 else []
 
+    hardware_name: str | None = None
     if hardware is not None:
+        if isinstance(hardware, str):
+            from commonlid.cost.rate_cards import get_hardware_card
+
+            hardware_name, hardware = hardware, get_hardware_card(hardware)
+        else:
+            hardware_name = "custom"
         per_sample = _compute_hours_per_sample(
             model, throughput, calibration_texts, batch_size, notes
         )
@@ -166,7 +176,7 @@ def estimate_cost(
     elif rate_overrides:
         from commonlid.cost.rate_cards import RateCard
 
-        card = RateCard(card_id="custom", rates=dict(rate_overrides), notes=("user-supplied",))
+        card = RateCard(rates=dict(rate_overrides), notes=("user-supplied",))
     elif usage:
         notes.append(f"No price known for {model.model_id}; pass --rate METER=USD_PER_UNIT.")
 
@@ -174,7 +184,7 @@ def estimate_cost(
     for meter, source, per_sample_range in usage:
         rate = None if card is None else card.rates.get(meter)
         if card is not None and rate is None:
-            notes.append(f"Rate card {card.card_id} does not price {meter!r}; left out of total.")
+            notes.append(f"The rate card does not price {meter!r}; left out of total.")
         meters.append(
             MeterEstimate(
                 meter=meter,
@@ -191,6 +201,7 @@ def estimate_cost(
         rate_card=card,
         meters=meters,
         notes=notes,
+        hardware=hardware_name,
     )
 
 
@@ -300,8 +311,9 @@ def format_estimate(estimate: CostEstimate) -> str:
     ]
     card = estimate.rate_card
     if card is not None:
-        provenance = ", ".join(p for p in (card.as_of and f"as of {card.as_of}", card.source) if p)
-        lines.append(f"Rate card: {card.card_id}" + (f" ({provenance})" if provenance else ""))
+        details = (estimate.hardware, card.as_of and f"as of {card.as_of}", card.source)
+        described = ", ".join(d for d in details if d) or "; ".join(card.notes)
+        lines.append(f"Rate card: {described}")
 
     if estimate.meters:
         header = ("meter", "source", "per sample", "total", "rate", "cost (expected, low-high)")
