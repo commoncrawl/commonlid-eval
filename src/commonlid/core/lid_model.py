@@ -10,6 +10,8 @@ from typing import ClassVar
 from iso639 import Lang
 from iso639.exceptions import DeprecatedLanguageValue, InvalidLanguageValue
 
+from commonlid.cost.rate_cards import RateCard
+from commonlid.cost.usage import Range, Usage
 from commonlid.preprocess import conform_langcode, openlid_normer_clean_line
 
 
@@ -36,11 +38,15 @@ class LIDModel(ABC):
     :meth:`predict` keeps returning bare codes.
     """
 
-    # `model_id` is a class attribute set by subclasses; a small number of
-    # models (e.g. :class:`~commonlid.models.dspy_llm.DSPyLLMModel`) override
-    # it per-instance, so it is not marked ``ClassVar``.
+    # `model_id` and `rate_card` are class attributes set by subclasses; a
+    # small number of models (e.g.
+    # :class:`~commonlid.models.dspy_llm.DSPyLLMModel`) override them
+    # per-instance, so they are not marked ``ClassVar``.
     model_id: str
     supported_languages: ClassVar[frozenset[str] | None] = None
+    # The price list a model billed per call (a paid API) is charged under.
+    # ``None`` for local models, whose cost is compute time.
+    rate_card: RateCard | None = None
     requires_preprocessing: ClassVar[bool] = True
     default_batch_size: ClassVar[int] = 64
 
@@ -88,6 +94,36 @@ class LIDModel(ABC):
         if isinstance(raw, LIDPrediction):
             return LIDPrediction(cls._conform(raw.iso639_3), raw.score)
         return LIDPrediction(cls._conform(raw), None)
+
+    def estimate_usage(self, texts: Sequence[str]) -> Usage | None:
+        """Count the billable usage of predicting ``texts``, without calling anything.
+
+        Applies the same preprocessing as :meth:`predict_scored`, since that
+        is what a metered backend actually receives. Returns ``None`` for
+        models with no per-call bill (local models, which cost compute time).
+        """
+        if self.requires_preprocessing:
+            prepared = [openlid_normer_clean_line(t) for t in texts]
+        else:
+            prepared = list(texts)
+        return self._estimate_usage(prepared)
+
+    def _estimate_usage(self, texts: Sequence[str]) -> Usage | None:  # noqa: ARG002
+        """Usage hook for metered backends; ``texts`` are already preprocessed."""
+        return None
+
+    def usage_assumptions(self) -> dict[str, Range]:
+        """Per-sample usage that cannot be counted offline, e.g. generated tokens."""
+        return {}
+
+    def measure_usage(self, texts: Sequence[str]) -> list[Usage] | None:
+        """Predict ``texts`` for real and return the usage of each billed request.
+
+        Used to calibrate :meth:`usage_assumptions`, so it costs real money on
+        metered backends. Returns ``None`` when the backend reports no usage.
+        """
+        self.predict_scored(texts)
+        return None
 
     def supports(self, iso639_3: str) -> bool:
         """Whether the model declares support for the given ISO 639-3 language."""

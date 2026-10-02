@@ -266,3 +266,18 @@ def test_discover_supported_languages() -> None:
     assert isinstance(supported, frozenset)
     # zh-CN and zh-TW collapse to one code; "" and "zzz" drop out.
     assert supported == frozenset({"eng", "zho", "heb"})
+
+
+def test_estimate_usage_counts_sent_characters() -> None:
+    model = GoogleTranslateV2Model(api_key="k")
+    model._MAX_CHARS_PER_TEXT = 5  # type: ignore[misc]
+    # Stripped, blanks skipped, clipped at the per-text cap: 2 + 0 + 5.
+    assert model._estimate_usage(["  ab ", "   ", "abcdefgh"]) == {"characters": 7.0}
+
+
+def test_rate_card_is_basic_edition() -> None:
+    card = GoogleTranslateV2Model(api_key="k").rate_card
+    assert card is not None
+    assert card is GoogleTranslateV2Model.rate_card
+    assert card.source == "https://cloud.google.com/translate/pricing"
+    assert card.rates == {"characters": pytest.approx(20e-6)}

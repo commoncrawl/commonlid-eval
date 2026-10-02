@@ -152,6 +152,49 @@ The `--api-base`, `--api-version`, `--api-key`, `--azure-ad-token`,
 `--llm-n-threads` flags are only consumed by `dspy:` models and ignored
 when every model is a classical one.
 
+## Estimating cost before a run
+
+Paid APIs and cloud hardware cost real money, so `estimate-cost` budgets a
+run up front. It reports every figure as **expected (low-high)**:
+
+```bash
+commonlid estimate-cost --model GoogleTranslate-v2 --dataset commonlid
+commonlid estimate-cost --model dspy:openai/gpt-5 --dataset commonlid
+commonlid estimate-cost --model GlotLID --dataset commonlid \
+  --hardware aws:g5.xlarge --throughput 500:2000:5000
+```
+
+```
+dspy_openai_gpt-5 on commonlid_nano (1,507 samples)
+Rate card: LiteLLM model map (litellm 1.83.0)
+
+meter             source   per sample     total                   rate     cost (expected, low-high)
+input_tokens      counted  298            449,693                 $1.25/M  $0.56
+output_tokens     assumed  16 (12-32)     24,112 (18,084-48,224)  $10/M    $0.24 ($0.18-$0.48)
+reasoning_tokens  assumed  256 (0-1,024)  385,792 (0-1,543,168)   $10/M    $3.86 ($0.00-$15.43)
+
+Total: $4.66 ($0.74-$16.48)
+```
+
+Each meter has a source, which tells you how much to trust it:
+
+| source | meaning |
+|---|---|
+| `counted` | Exact, counted offline over every sample: characters sent to Google, prompt tokens via the model's tokenizer. No API calls. |
+| `assumed` | A per-sample range for what can't be counted offline: generated and reasoning tokens, hardware throughput. Override it with `--assume METER=LOW:EXPECTED:HIGH` or `--throughput LOW:EXPECTED:HIGH`. |
+| `calibrated` | Measured with `--calibrate N`, which predicts N random samples **for real** and replaces the assumptions with the mean and a 95% confidence interval. This costs money on paid APIs, and LLMs then need the same `--api-base`/auth flags as `run`. |
+
+Prices come from rate cards with an "as of" date and a source URL. LLM token
+prices come from LiteLLM's model map. Other paid APIs declare their price
+on the model class (`rate_card`), and hardware prices are built in. `commonlid
+list-rate-cards` lists both. Use `--hourly-rate USD` for hardware not
+in that list, and `--rate METER=USD_PER_UNIT` to override any price. Rates
+are linear list prices: free tiers and volume discounts are not modelled.
+Prediction caches are ignored too, so the estimate is for a run from scratch.
+
+Hardware throughput from `--calibrate` is measured on the machine running
+the command, so it only applies to `--hardware` if that is the same hardware.
+
 ## Python API
 
 The `commonlid` import auto-registers every shipped model and dataset, so

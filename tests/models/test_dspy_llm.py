@@ -334,3 +334,104 @@ def test_azure_token_provider_uses_default_credential(
     provider = _azure_token_provider()
     assert provider == "TOKEN_PROVIDER"
     assert captured["scope"].endswith(".default")
+
+
+def _model(name: str = "openai/gpt-x") -> Any:
+    from commonlid.models.dspy_llm import DSPyLLMModel
+
+    return DSPyLLMModel(llm_model_name=name, api_base="https://example")
+
+
+def test_estimate_usage_counts_overhead_plus_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    import litellm
+
+    def fake_counter(model: str, text: Any = None, messages: Any = None) -> int:
+        return 100 if messages is not None else len(text)
+
+    monkeypatch.setattr(litellm, "token_counter", fake_counter)
+    model = _model()
+    assert model.estimate_usage(["abc", "hello"]) == {"input_tokens": 208.0}
+    assert model._overhead_tokens == 100
+
+
+def test_estimate_usage_falls_back_to_heuristic(monkeypatch: pytest.MonkeyPatch) -> None:
+    import litellm
+
+    def boom(**_kw: Any) -> int:
+        raise ValueError("no tokenizer")
+
+    monkeypatch.setattr(litellm, "token_counter", boom)
+    model = _model()
+    usage = model.estimate_usage(["a" * 40])
+    assert model._overhead_tokens > 0
+    assert usage == {"input_tokens": float(model._overhead_tokens + 10)}
+
+
+def test_usage_assumptions_add_reasoning_for_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_reasoning", lambda model: model == "openai/r")
+    assert set(_model("openai/r").usage_assumptions()) == {"output_tokens", "reasoning_tokens"}
+    assert set(_model("openai/plain").usage_assumptions()) == {"output_tokens"}
+
+    def boom(model: str) -> bool:
+        raise ValueError("unknown model")
+
+    monkeypatch.setattr(litellm, "supports_reasoning", boom)
+    assert set(_model().usage_assumptions()) == {"output_tokens"}
+
+
+def test_rate_card_comes_from_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from commonlid.models import dspy_llm as dspy_llm_mod
+
+    monkeypatch.setattr(dspy_llm_mod, "litellm_rate_card", lambda name: f"card:{name}")
+    assert _model("azure/m").rate_card == "card:azure/m"
+
+
+def test_usage_from_response_splits_out_reasoning() -> None:
+    from types import SimpleNamespace
+
+    from commonlid.models.dspy_llm import _usage_from_response
+
+    usage = {
+        "prompt_tokens": 300,
+        "completion_tokens": 120,
+        "completion_tokens_details": {"reasoning_tokens": 100},
+    }
+    expected = {"input_tokens": 300.0, "output_tokens": 20.0, "reasoning_tokens": 100.0}
+    assert _usage_from_response(usage) == expected
+    usage["completion_tokens_details"] = SimpleNamespace(reasoning_tokens=100)
+    assert _usage_from_response(usage) == expected
+    assert _usage_from_response({}) == {
+        "input_tokens": 0.0,
+        "output_tokens": 0.0,
+        "reasoning_tokens": 0.0,
+    }
+
+
+def test_measure_usage_reads_lm_history_and_bypasses_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from commonlid.models.dspy_llm import DSPyLLMModel
+
+    model = DSPyLLMModel(llm_model_name="openai/x", api_base="https://e", cache_dir=tmp_path)
+    model._lm = type("LM", (), {"history": [{"usage": {"prompt_tokens": 1}}]})()
+    model._loaded = True
+    seen_cache: list[Any] = []
+
+    def fake_predict(texts: list[str]) -> list[str]:
+        seen_cache.append(model.cache_dir)
+        model._lm.history.extend(
+            {"usage": {"prompt_tokens": 10, "completion_tokens": 3}} for _ in texts
+        )
+        return ["eng"] * len(texts)
+
+    monkeypatch.setattr(model, "_predict_batch", fake_predict)
+    usage = model.measure_usage(["a", "b"])
+
+    # Stale history is dropped, the cache is off during the call and restored after.
+    assert usage == [{"input_tokens": 10.0, "output_tokens": 3.0, "reasoning_tokens": 0.0}] * 2
+    assert seen_cache == [None]
+    assert model.cache_dir == tmp_path

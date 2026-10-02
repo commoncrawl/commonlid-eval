@@ -46,12 +46,17 @@ def register_dataset(cls: type[_DatasetT]) -> type[_DatasetT]:
     return cls
 
 
-def get_model(model_id: str) -> LIDModel:
-    """Instantiate a registered model by id. Raises :class:`KeyError` if unknown."""
+def get_model_class(model_id: str) -> type[LIDModel]:
+    """Look up a registered model class by id. Raises :class:`KeyError` if unknown."""
     if model_id not in _MODEL_REGISTRY:
         msg = f"Unknown model_id: {model_id!r}. Known ids: {sorted(_MODEL_REGISTRY)}"
         raise KeyError(msg)
-    return _MODEL_REGISTRY[model_id]()
+    return _MODEL_REGISTRY[model_id]
+
+
+def get_model(model_id: str) -> LIDModel:
+    """Instantiate a registered model by id. Raises :class:`KeyError` if unknown."""
+    return get_model_class(model_id)()
 
 
 def get_dataset(dataset_id: str) -> LIDDataset:

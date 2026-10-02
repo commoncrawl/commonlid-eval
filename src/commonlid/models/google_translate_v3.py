@@ -45,6 +45,8 @@ from typing import Any, ClassVar
 
 from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
+from commonlid.cost.rate_cards import RateCard
+from commonlid.cost.usage import CHARACTERS, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,14 @@ class GoogleTranslateV3Model(LIDModel):
     """Cloud Translation Advanced (v3) ``detectLanguage`` as a LID model."""
 
     model_id = "GoogleTranslate-v3"
+    # Language detection is billed per character sent, at the same price on
+    # both editions; v3's one request per text is not billed separately.
+    rate_card = RateCard(
+        rates={CHARACTERS: 20.0 / 1_000_000},
+        as_of="2026-10-02",
+        source="https://cloud.google.com/translate/pricing",
+        notes=("Advanced edition language detection",),
+    )
 
     _LOCATION: ClassVar[str] = "global"
     # v3 takes one text per call, so a batch fans out. The project-wide quota
@@ -170,6 +180,12 @@ class GoogleTranslateV3Model(LIDModel):
                 )
                 time.sleep(delay)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def _estimate_usage(self, texts: Sequence[str]) -> Usage:
+        # Billed per character of what is sent: stripped, non-blank and
+        # clipped exactly as `_predict_batch` does.
+        sent = (t.strip()[: self._MAX_CHARS_PER_TEXT] for t in texts)
+        return {CHARACTERS: float(sum(len(t) for t in sent))}
 
     def discover_supported_languages(self) -> frozenset[str]:
         """Ask the API which languages it supports, as ISO 639-3."""
