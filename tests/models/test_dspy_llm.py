@@ -387,7 +387,7 @@ def test_rate_card_comes_from_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
     from commonlid.models import dspy_llm as dspy_llm_mod
 
     monkeypatch.setattr(dspy_llm_mod, "litellm_rate_card", lambda name: f"card:{name}")
-    assert _model("azure/m").rate_card() == "card:azure/m"
+    assert _model("azure/m").rate_card == "card:azure/m"
 
 
 def test_usage_from_response_splits_out_reasoning() -> None:

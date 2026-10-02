@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from commonlid.core.lid_model import LIDModel
-from commonlid.cost.rate_cards import RateCard, litellm_rate_card
+from commonlid.cost.rate_cards import litellm_rate_card
 from commonlid.cost.usage import (
     INPUT_TOKENS,
     OUTPUT_TOKENS,
@@ -136,6 +136,8 @@ class DSPyLLMModel(LIDModel):
         self._module: DSPyLangIDModule | None = None
         self._lm: Any = None
         self._overhead_tokens: int | None = None
+        # Priced by model name, so the card is per instance.
+        self.rate_card = litellm_rate_card(llm_model_name)
         # Customise the registered id when a model name is supplied so multiple
         # instantiations of this class end up under unique cache folders.
         self.model_id = f"dspy_{llm_model_name.replace('/', '_')}"
@@ -226,9 +228,6 @@ class DSPyLLMModel(LIDModel):
         if _supports_reasoning(self.llm_model_name):
             assumptions[REASONING_TOKENS] = _REASONING_TOKENS_ASSUMPTION
         return assumptions
-
-    def rate_card(self) -> RateCard | None:
-        return litellm_rate_card(self.llm_model_name)
 
     def measure_usage(self, texts: Sequence[str]) -> list[Usage]:
         """Predict ``texts`` live and read each request's usage from the LM history."""

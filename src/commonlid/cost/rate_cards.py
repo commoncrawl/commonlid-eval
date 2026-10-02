@@ -3,7 +3,7 @@
 Prices drift, so every card carries the date it was checked and the page it
 came from. LLM token prices are read from LiteLLM's model map (:func:`litellm_rate_card`), which is
 maintained upstream. A paid API's own price list lives on its model class as
-:attr:`LIDModel.pricing`; this module holds what is shared: the hardware a
+:attr:`LIDModel.rate_card`; this module holds what is shared: the hardware a
 self-hosted model can run on.
 
 Rates are linear USD per unit. Free tiers, volume tiers and committed-use

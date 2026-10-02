@@ -276,7 +276,8 @@ def test_estimate_usage_counts_sent_characters() -> None:
 
 
 def test_rate_card_is_basic_edition() -> None:
-    card = GoogleTranslateV2Model(api_key="k").rate_card()
-    assert card is GoogleTranslateV2Model.pricing
+    card = GoogleTranslateV2Model(api_key="k").rate_card
+    assert card is not None
+    assert card is GoogleTranslateV2Model.rate_card
     assert card.card_id == "google-translate-v2"
     assert card.rates == {"characters": pytest.approx(20e-6)}

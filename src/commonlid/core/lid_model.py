@@ -38,14 +38,15 @@ class LIDModel(ABC):
     :meth:`predict` keeps returning bare codes.
     """
 
-    # `model_id` is a class attribute set by subclasses; a small number of
-    # models (e.g. :class:`~commonlid.models.dspy_llm.DSPyLLMModel`) override
-    # it per-instance, so it is not marked ``ClassVar``.
+    # `model_id` and `rate_card` are class attributes set by subclasses; a
+    # small number of models (e.g.
+    # :class:`~commonlid.models.dspy_llm.DSPyLLMModel`) override them
+    # per-instance, so they are not marked ``ClassVar``.
     model_id: str
     supported_languages: ClassVar[frozenset[str] | None] = None
-    # What one call costs, for models billed per call (paid APIs). ``None``
-    # for local models, whose cost is compute time.
-    pricing: ClassVar[RateCard | None] = None
+    # The price list a model billed per call (a paid API) is charged under.
+    # ``None`` for local models, whose cost is compute time.
+    rate_card: RateCard | None = None
     requires_preprocessing: ClassVar[bool] = True
     default_batch_size: ClassVar[int] = 64
 
@@ -114,14 +115,6 @@ class LIDModel(ABC):
     def usage_assumptions(self) -> dict[str, Range]:
         """Per-sample usage that cannot be counted offline, e.g. generated tokens."""
         return {}
-
-    def rate_card(self) -> RateCard | None:
-        """The price list this model is billed under, or ``None`` if it has none.
-
-        Defaults to :attr:`pricing`; override it when the price depends on
-        the instance, as for LLMs priced by model name.
-        """
-        return self.pricing
 
     def measure_usage(self, texts: Sequence[str]) -> list[Usage] | None:
         """Predict ``texts`` for real and return the usage of each billed request.

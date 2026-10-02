@@ -349,7 +349,7 @@ def estimate_cost_cmd(
 def list_rate_cards_cmd(
     as_json: Annotated[bool, typer.Option("--json", help="Output JSON instead of text.")] = False,
 ) -> None:
-    """List the built-in rate cards: each paid model's pricing, then hardware.
+    """List the built-in rate cards: each paid model's, then hardware.
 
     LLM token prices are not listed; they come from LiteLLM's model map.
     """
@@ -357,7 +357,7 @@ def list_rate_cards_cmd(
 
     cards = {
         card.card_id: card
-        for card in (get_model_class(model_id).pricing for model_id in list_models())
+        for card in (get_model_class(model_id).rate_card for model_id in list_models())
         if card is not None
     }
     cards.update(HARDWARE_CARDS)

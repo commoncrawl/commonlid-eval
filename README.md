@@ -186,7 +186,7 @@ Each meter has a source, which tells you how much to trust it:
 
 Prices come from rate cards with an "as of" date and a source URL. LLM token
 prices come from LiteLLM's model map. Other paid APIs declare their price
-on the model class (`pricing`), and hardware prices are built in. `commonlid
+on the model class (`rate_card`), and hardware prices are built in. `commonlid
 list-rate-cards` lists both. Use `--hourly-rate USD` for hardware not
 in that list, and `--rate METER=USD_PER_UNIT` to override any price. Rates
 are linear list prices: free tiers and volume discounts are not modelled.

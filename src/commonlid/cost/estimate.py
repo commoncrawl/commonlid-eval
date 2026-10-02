@@ -154,7 +154,7 @@ def estimate_cost(
         usage = _api_usage(
             model, dataset, n_samples, assumptions or {}, calibration_texts, batch_size, notes
         )
-        card = model.rate_card()
+        card = model.rate_card
         if not usage:
             notes.append(
                 f"{model.model_id} is not billed per call. To price compute time, pass "

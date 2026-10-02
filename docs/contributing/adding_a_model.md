@@ -70,7 +70,7 @@ hooks, so that `commonlid estimate-cost` can budget a run before it starts:
 ```python
 from commonlid.cost import Range, RateCard
 
-    pricing = RateCard(
+    rate_card = RateCard(
         card_id="my-api",
         rates={"characters": 20.0 / 1_000_000},  # USD per unit
         as_of="2026-10-02",
@@ -87,11 +87,11 @@ from commonlid.cost import Range, RateCard
 ```
 
 When the price depends on the instance, as for LLMs priced by model name,
-override `rate_card()` instead of setting `pricing`.
+set `self.rate_card` in `__init__` instead.
 
 To support `--calibrate`, override `measure_usage(texts)` as well. It should
 predict `texts` for real and return the usage the API reported for each
-request. Always give `pricing` an `as_of` date and a source URL, since prices
+request. Always give `rate_card` an `as_of` date and a source URL, since prices
 drift. Local models need none of this: their cost
 is compute time, which `--hardware` and `--throughput` cover.
 

@@ -67,8 +67,7 @@ class MeteredModel(LIDModel):
     def usage_assumptions(self) -> dict[str, Range]:
         return {"output_tokens": Range(1, 2, 4)}
 
-    def rate_card(self) -> RateCard:
-        return RateCard("stub-card", {"characters": 0.5, "output_tokens": 1.0})
+    rate_card = RateCard("stub-card", {"characters": 0.5, "output_tokens": 1.0})
 
     def measure_usage(self, texts: Sequence[str]) -> list[dict[str, float]] | None:
         self.measured_texts = list(texts)
@@ -137,13 +136,8 @@ def test_hardware_cards() -> None:
         get_hardware_card("nope")
 
 
-def test_rate_card_defaults_to_class_pricing() -> None:
-    assert LocalModel().rate_card() is None
-
-    class Priced(LocalModel):
-        pricing = RateCard("priced", {"characters": 1.0})
-
-    assert Priced().rate_card() is Priced.pricing
+def test_local_models_have_no_rate_card() -> None:
+    assert LocalModel().rate_card is None
 
 
 def test_hourly_rate_card() -> None:
@@ -253,8 +247,7 @@ def test_unmetered_model_without_hardware() -> None:
 
 def test_unpriced_model_gets_a_note() -> None:
     class Unpriced(MeteredModel):
-        def rate_card(self) -> None:  # type: ignore[override]
-            return None
+        rate_card = None
 
     est = estimate_cost(Unpriced(), StubDataset())
     assert est.total_cost is None
@@ -322,7 +315,7 @@ def test_format_and_to_dict() -> None:
 def test_format_small_rates_and_costs() -> None:
     card = RateCard("per-million", {"characters": 20e-6})
     model = MeteredModel()
-    model.rate_card = lambda: card  # type: ignore[method-assign]
+    model.rate_card = card
     text = format_estimate(estimate_cost(model, StubDataset()))
     assert "$20/M" in text
     assert "$0.00036" in text
