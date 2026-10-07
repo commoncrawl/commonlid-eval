@@ -209,13 +209,15 @@ def sample_breakdown(
     (``lvs`` / ``lav``) count as a match, and ``consensus_pred`` /
     ``top_wrong_pred`` are reported at the macrolanguage level.
 
-    Returned columns (sorted hardest first):
+    Returned columns (sorted by ``error_rate`` descending, then ``agreement``
+    descending):
 
     - ``idx``, ``text_hash``, ``gold``
     - ``n_models`` -- models with a prediction for this sample
     - ``n_correct`` / ``n_wrong`` / ``error_rate`` (= ``n_wrong / n_models``)
-    - ``consensus_pred`` / ``consensus_share`` -- the most common prediction
-      and the share of models that made it
+    - ``consensus_pred`` / ``agreement`` -- the most common prediction and the
+      share of models that made it (1.0 = all models predict the same label,
+      whether right or wrong)
     - ``top_wrong_pred`` / ``top_wrong_count`` -- most common wrong prediction
     - ``label_suspect`` -- at least two models, and at least
       ``suspect_min_agreement`` of them agree on the same label that is
@@ -237,7 +239,7 @@ def sample_breakdown(
                 "n_wrong",
                 "error_rate",
                 "consensus_pred",
-                "consensus_share",
+                "agreement",
                 "top_wrong_pred",
                 "top_wrong_count",
                 "label_suspect",
@@ -265,7 +267,7 @@ def sample_breakdown(
 
     consensus = _top_label(df, "idx", "pred_norm", "consensus_count")
     out["consensus_pred"] = consensus["pred_norm"]
-    out["consensus_share"] = consensus["consensus_count"] / out["n_models"]
+    out["agreement"] = consensus["consensus_count"] / out["n_models"]
 
     wrong = _top_label(df[~df["correct"]], "idx", "pred_norm", "top_wrong_count")
     out["top_wrong_pred"] = wrong["pred_norm"].reindex(out.index)
@@ -277,7 +279,7 @@ def sample_breakdown(
         (out["n_models"] >= 2)
         & (out["consensus_pred"] != out["gold_cmp"])
         & (out["consensus_pred"] != UND_TOKEN)
-        & (out["consensus_share"] >= suspect_min_agreement)
+        & (out["agreement"] >= suspect_min_agreement)
     )
 
     wide = df.pivot(index="idx", columns="model_id", values="pred")
@@ -286,7 +288,7 @@ def sample_breakdown(
 
     out = out.drop(columns="gold_cmp").reset_index()
     out = out.sort_values(
-        ["error_rate", "consensus_share", "idx"], ascending=[False, False, True], kind="stable"
+        ["error_rate", "agreement", "idx"], ascending=[False, False, True], kind="stable"
     )
     return out.reset_index(drop=True)
 
@@ -301,11 +303,13 @@ def language_breakdown(
 ) -> Any:
     """Per-gold-language breakdown across the models present in ``preds``.
 
-    Returned columns (sorted hardest first):
+    Returned columns (sorted by ``error_rate`` descending):
 
     - ``language`` -- gold ISO 639-3 code
     - ``n_samples`` -- samples with this gold label
     - ``error_rate`` -- mean per-sample error rate (= 1 - mean model recall)
+    - ``agreement`` -- mean per-sample ``agreement`` (how often the models
+      predict the same label as each other)
     - ``all_wrong_share`` / ``all_correct_share`` -- share of samples every
       model got wrong / right
     - ``n_label_suspect`` -- samples flagged by :func:`sample_breakdown`
@@ -331,6 +335,7 @@ def language_breakdown(
         "language",
         "n_samples",
         "error_rate",
+        "agreement",
         "all_wrong_share",
         "all_correct_share",
         "n_label_suspect",
@@ -348,6 +353,7 @@ def language_breakdown(
     out = s.groupby("gold", sort=True).agg(
         n_samples=("idx", "size"),
         error_rate=("error_rate", "mean"),
+        agreement=("agreement", "mean"),
         all_wrong_share=("all_wrong", "mean"),
         all_correct_share=("all_correct", "mean"),
         n_label_suspect=("label_suspect", "sum"),

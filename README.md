@@ -704,15 +704,16 @@ it at your own results directory.
 top-k models on a dataset (ranked by a leaderboard metric, `macro_f1` by
 default) and reports, per sample or per gold language, how often they get it
 right or wrong, what they predict instead and how much they agree. Use it to
-find the hardest (or easiest) languages and samples, and candidate
+find languages and samples with high or low error and agreement, and candidate
 annotation errors:
 
 ```bash
 # Languages ranked by how often the 5 best models on CommonLID miss them
 commonlid breakdown --dataset commonlid --top-k 5
 
-# ... or the easiest ones first
-commonlid breakdown --dataset commonlid --top-k 5 --order easiest
+# ... lowest error first, or languages where the models disagree most
+commonlid breakdown --dataset commonlid --top-k 5 --order asc
+commonlid breakdown --dataset commonlid --top-k 5 --sort-by agreement --order asc
 
 # Samples where most of the top models agree on a *different* label than
 # the gold one: candidate annotation errors, with the text joined back in
@@ -721,17 +722,19 @@ commonlid breakdown --dataset commonlid --top-k 5 --level sample \
 ```
 
 - `--level language` (default): one row per gold language with the mean
-  `error_rate`, the share of samples every model gets wrong / right, the
+  `error_rate` and `agreement`, the share of samples every model gets wrong / right, the
   most common confusion and each model's recall.
 - `--level sample`: one row per sample with `n_wrong` / `error_rate`, the
-  consensus prediction and each model's prediction. `label_suspect` is set
+  consensus prediction, `agreement` (share of models making that prediction)
+  and each model's prediction. `label_suspect` is set
   when at least `--suspect-min-agreement` (default 0.8) of the models agree
   on the same label that is neither the gold one nor `und`.
 - `--collapse-macrolanguages` counts an individual language and its
   macrolanguage (`lvs` / `lav`, `cmn` / `zho`) as a match, which otherwise
   dominate the error lists.
-- `--order hardest|easiest` sorts by `error_rate`; `--min-error-rate` /
-  `--max-error-rate` filter on it.
+- `--sort-by COLUMN` (default `error_rate`, e.g. `agreement`) with
+  `--order desc|asc` (default `desc`, highest first) sets the ranking;
+  `--min-error-rate` / `--max-error-rate` filter on the error rate.
 - `--model X --model Y` picks models explicitly instead of `--top-k`;
   `--exclude-model` drops one from the ranking. `--local-dir ./results`
   reads a local results directory instead of the Hub.

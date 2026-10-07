@@ -144,7 +144,7 @@ def test_sample_breakdown(results_dir: Path) -> None:
     # Unanimous alternative label -> annotation-error candidate.
     assert s.loc[1, "error_rate"] == 1.0
     assert s.loc[1, "consensus_pred"] == "nld"
-    assert s.loc[1, "consensus_share"] == 1.0
+    assert s.loc[1, "agreement"] == 1.0
     assert s.loc[1, "label_suspect"]
 
     # Disagreement -> hard but not suspect; ties broken alphabetically.
@@ -158,7 +158,7 @@ def test_sample_breakdown(results_dir: Path) -> None:
     assert not s.loc[4, "label_suspect"]
     assert pd.isna(s.loc[4, "pred:A"])
 
-    # Sorted hardest first.
+    # Sorted by error_rate, highest first.
     ordered = sample_breakdown(preds)
     assert list(ordered["idx"][:2]) == [1, 3]
     assert ordered["error_rate"].is_monotonic_decreasing
@@ -212,6 +212,9 @@ def test_language_breakdown(results_dir: Path) -> None:
     assert lang.loc["eng", "top_confusion"] == "und"
     assert lang.loc["eng", "recall:B"] == 1.0
     assert lang.loc["eng", "recall:A"] == 0.5
+    # eng: sample 0 unanimous, sample 4 two of three agree on und.
+    assert lang.loc["eng", "agreement"] == pytest.approx((1 + 2 / 3) / 2)
+    assert lang.loc["fra", "agreement"] == pytest.approx(1 / 3)
 
     assert lang.loc["deu", "n_label_suspect"] == 1
     assert lang.loc["deu", "top_confusion"] == "nld"
@@ -349,13 +352,23 @@ def test_cli_min_error_rate_and_min_samples(results_dir: Path) -> None:
     assert "3 language row(s)" in result.output
 
 
-def test_cli_easiest_first_and_max_error_rate(results_dir: Path, tmp_path: Path) -> None:
-    out = tmp_path / "easy.csv"
-    result = _cli(results_dir, "--order", "easiest", "--out", str(out))
+def test_cli_sort_and_max_error_rate(results_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "sorted.csv"
+    result = _cli(results_dir, "--order", "asc", "--out", str(out))
     assert result.exit_code == 0, result.output
     df = pd.read_csv(out)
     assert df["error_rate"].is_monotonic_increasing
     assert df["language"].iloc[0] == "eng"
+
+    by_agreement = _cli(results_dir, "--sort-by", "agreement", "--order", "asc", "--out", str(out))
+    assert by_agreement.exit_code == 0, by_agreement.output
+    df = pd.read_csv(out)
+    assert df["agreement"].is_monotonic_increasing
+    assert df["language"].iloc[0] == "fra"
+
+    bad = _cli(results_dir, "--sort-by", "nope")
+    assert bad.exit_code == 2
+    assert "unknown --sort-by" in bad.output
 
     capped = _cli(results_dir, "--level", "sample", "--max-error-rate", "0", "--out", str(out))
     assert capped.exit_code == 0, capped.output

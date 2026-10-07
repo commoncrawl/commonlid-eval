@@ -656,9 +656,9 @@ class BreakdownLevel(str, Enum):
     language = "language"
 
 
-class BreakdownOrder(str, Enum):
-    hardest = "hardest"
-    easiest = "easiest"
+class SortOrder(str, Enum):
+    desc = "desc"
+    asc = "asc"
 
 
 @app.command("breakdown")
@@ -708,10 +708,17 @@ def breakdown(
         typer.Option("--out", help="Write the full table here (.csv, .jsonl or .parquet)."),
     ] = None,
     show: Annotated[int, typer.Option("--show", help="Rows to print to stdout (0 = none).")] = 20,
+    sort_by: Annotated[
+        str,
+        typer.Option(
+            "--sort-by",
+            help="Column to sort by, e.g. error_rate or agreement (any output column works).",
+        ),
+    ] = "error_rate",
     order: Annotated[
-        BreakdownOrder,
-        typer.Option("--order", help="Sort by error_rate: hardest or easiest rows first."),
-    ] = BreakdownOrder.hardest,
+        SortOrder,
+        typer.Option("--order", help="desc = highest values first, asc = lowest first."),
+    ] = SortOrder.desc,
     min_error_rate: Annotated[
         float,
         typer.Option("--min-error-rate", help="Keep only rows with error_rate >= this value."),
@@ -756,8 +763,8 @@ def breakdown(
     """Break down how the top-k models do per sample or per gold language.
 
     Uses the per-sample predictions published in the results HF dataset and
-    reports error rates, confusions and model agreement, hardest rows first
-    (or easiest with ``--order easiest``). Samples where most models agree on
+    reports error rates, confusions and model agreement, sorted by
+    ``--sort-by`` (default: highest ``error_rate`` first). Samples where most models agree on
     a different label than the gold one are flagged as ``label_suspect``
     (candidate annotation errors).
     """
@@ -824,9 +831,13 @@ def breakdown(
             min_samples=min_samples,
         )
     table = table[table["error_rate"].between(min_error_rate, max_error_rate)]
-    if order is BreakdownOrder.easiest:
-        # Stable, so ties keep the secondary order of the hardest-first sort.
-        table = table.sort_values("error_rate", kind="stable")
+    if sort_by not in table.columns:
+        typer.echo(
+            f"unknown --sort-by column {sort_by!r}; available: {list(table.columns)}", err=True
+        )
+        raise typer.Exit(code=2)
+    # Stable, so ties keep the default order (error_rate desc, then agreement / size).
+    table = table.sort_values(sort_by, ascending=order is SortOrder.asc, kind="stable")
     table = table.reset_index(drop=True)
     if with_text and level is BreakdownLevel.sample:
         try:
