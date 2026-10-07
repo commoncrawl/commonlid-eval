@@ -651,20 +651,25 @@ def export_csv(
     typer.echo(f"Wrote {len(rows)} rows to {out}")
 
 
-class DifficultyLevel(str, Enum):
+class BreakdownLevel(str, Enum):
     sample = "sample"
     language = "language"
 
 
-@app.command("difficulty")
-def difficulty(
+class BreakdownOrder(str, Enum):
+    hardest = "hardest"
+    easiest = "easiest"
+
+
+@app.command("breakdown")
+def breakdown(
     dataset: Annotated[
         str, typer.Option("--dataset", help="Dataset id in the results repo (e.g. commonlid).")
     ],
     level: Annotated[
-        DifficultyLevel,
+        BreakdownLevel,
         typer.Option("--level", help="Aggregate per sample or per gold language."),
-    ] = DifficultyLevel.language,
+    ] = BreakdownLevel.language,
     top_k: Annotated[
         int, typer.Option("--top-k", "-k", help="Use the k best models on this dataset.")
     ] = 5,
@@ -703,10 +708,18 @@ def difficulty(
         typer.Option("--out", help="Write the full table here (.csv, .jsonl or .parquet)."),
     ] = None,
     show: Annotated[int, typer.Option("--show", help="Rows to print to stdout (0 = none).")] = 20,
+    order: Annotated[
+        BreakdownOrder,
+        typer.Option("--order", help="Sort by error_rate: hardest or easiest rows first."),
+    ] = BreakdownOrder.hardest,
     min_error_rate: Annotated[
         float,
         typer.Option("--min-error-rate", help="Keep only rows with error_rate >= this value."),
     ] = 0.0,
+    max_error_rate: Annotated[
+        float,
+        typer.Option("--max-error-rate", help="Keep only rows with error_rate <= this value."),
+    ] = 1.0,
     only_suspect: Annotated[
         bool,
         typer.Option(
@@ -740,19 +753,21 @@ def difficulty(
         ),
     ] = False,
 ) -> None:
-    """Find the samples or languages the top-k models get wrong most often.
+    """Break down how the top-k models do per sample or per gold language.
 
-    Uses the per-sample predictions published in the results HF dataset.
-    Samples where most models agree on a different label than the gold one
-    are flagged as ``label_suspect`` (candidate annotation errors).
+    Uses the per-sample predictions published in the results HF dataset and
+    reports error rates, confusions and model agreement, hardest rows first
+    (or easiest with ``--order easiest``). Samples where most models agree on
+    a different label than the gold one are flagged as ``label_suspect``
+    (candidate annotation errors).
     """
     import pandas as pd
 
     from commonlid.analysis import (
         attach_texts,
-        language_difficulty,
+        language_breakdown,
         load_predictions,
-        sample_difficulty,
+        sample_breakdown,
         select_top_models,
     )
     from commonlid.leaderboard.data import load_results
@@ -792,26 +807,28 @@ def difficulty(
     used = list(dict.fromkeys(preds["model_id"]))
     typer.echo(f"Models ({len(used)}): {', '.join(used)}", err=True)
 
-    samples = sample_difficulty(
+    samples = sample_breakdown(
         preds,
         suspect_min_agreement=suspect_min_agreement,
         collapse_macrolanguages=collapse_macrolanguages,
     )
-    if level is DifficultyLevel.sample:
+    if level is BreakdownLevel.sample:
         table = samples
         if only_suspect:
             table = table[table["label_suspect"]]
     else:
-        table = language_difficulty(
+        table = language_breakdown(
             preds,
             samples=samples,
             collapse_macrolanguages=collapse_macrolanguages,
             min_samples=min_samples,
         )
-    if min_error_rate > 0:
-        table = table[table["error_rate"] >= min_error_rate]
+    table = table[table["error_rate"].between(min_error_rate, max_error_rate)]
+    if order is BreakdownOrder.easiest:
+        # Stable, so ties keep the secondary order of the hardest-first sort.
+        table = table.sort_values("error_rate", kind="stable")
     table = table.reset_index(drop=True)
-    if with_text and level is DifficultyLevel.sample:
+    if with_text and level is BreakdownLevel.sample:
         try:
             table = attach_texts(table, dataset)
         except Exception as exc:

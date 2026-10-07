@@ -1,4 +1,4 @@
-"""Tests for ``commonlid.analysis`` (top-k model difficulty analysis, offline)."""
+"""Tests for ``commonlid.analysis`` (top-k model breakdown, offline)."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from typer.testing import CliRunner
 
 from commonlid.analysis import (
     attach_texts,
-    language_difficulty,
+    language_breakdown,
     load_predictions,
-    sample_difficulty,
+    sample_breakdown,
     select_top_models,
 )
-from commonlid.analysis.difficulty import to_macrolanguage
+from commonlid.analysis.breakdown import to_macrolanguage
 from commonlid.cli import app
 from commonlid.evaluation.evaluator import _text_hash
 
@@ -111,8 +111,8 @@ def test_load_predictions_local(results_dir: Path) -> None:
 def test_load_predictions_empty(tmp_path: Path) -> None:
     preds = load_predictions(DATASET, ["A"], local_dir=tmp_path)
     assert preds.empty
-    assert sample_difficulty(preds).empty
-    assert language_difficulty(preds).empty
+    assert sample_breakdown(preds).empty
+    assert language_breakdown(preds).empty
 
 
 def test_load_predictions_hub(monkeypatch: pytest.MonkeyPatch, results_dir: Path) -> None:
@@ -131,9 +131,9 @@ def test_load_predictions_hub(monkeypatch: pytest.MonkeyPatch, results_dir: Path
     assert calls["allow_patterns"] == [f"{DATASET}/A/predictions.jsonl"]
 
 
-def test_sample_difficulty(results_dir: Path) -> None:
+def test_sample_breakdown(results_dir: Path) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
-    s = sample_difficulty(preds).set_index("idx")
+    s = sample_breakdown(preds).set_index("idx")
 
     assert list(s.columns[-3:]) == ["pred:A", "pred:B", "pred:C"]
     assert s.loc[0, "n_correct"] == 3
@@ -159,33 +159,33 @@ def test_sample_difficulty(results_dir: Path) -> None:
     assert pd.isna(s.loc[4, "pred:A"])
 
     # Sorted hardest first.
-    ordered = sample_difficulty(preds)
+    ordered = sample_breakdown(preds)
     assert list(ordered["idx"][:2]) == [1, 3]
     assert ordered["error_rate"].is_monotonic_decreasing
 
 
-def test_sample_difficulty_agreement_threshold(results_dir: Path) -> None:
+def test_sample_breakdown_agreement_threshold(results_dir: Path) -> None:
     preds = load_predictions(DATASET, ["A", "B"], local_dir=results_dir)
-    lax = sample_difficulty(preds, suspect_min_agreement=0.5).set_index("idx")
+    lax = sample_breakdown(preds, suspect_min_agreement=0.5).set_index("idx")
     # A=ita, B=spa: each 50% of the models agree on a wrong label.
     assert lax.loc[2, "label_suspect"]
-    strict = sample_difficulty(preds, suspect_min_agreement=1.0).set_index("idx")
+    strict = sample_breakdown(preds, suspect_min_agreement=1.0).set_index("idx")
     assert not strict.loc[2, "label_suspect"]
     assert strict.loc[1, "label_suspect"]
 
 
 def test_single_model_is_never_suspect(results_dir: Path) -> None:
     preds = load_predictions(DATASET, ["A"], local_dir=results_dir)
-    assert not sample_difficulty(preds)["label_suspect"].any()
+    assert not sample_breakdown(preds)["label_suspect"].any()
 
 
 def test_collapse_macrolanguages(results_dir: Path) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
-    strict = sample_difficulty(preds).set_index("idx")
+    strict = sample_breakdown(preds).set_index("idx")
     assert strict.loc[3, "error_rate"] == 1.0
     assert strict.loc[3, "label_suspect"]
 
-    collapsed = sample_difficulty(preds, collapse_macrolanguages=True).set_index("idx")
+    collapsed = sample_breakdown(preds, collapse_macrolanguages=True).set_index("idx")
     assert collapsed.loc[3, "error_rate"] == 0.0
     assert not collapsed.loc[3, "label_suspect"]
     # The raw gold label is kept in the output.
@@ -199,9 +199,9 @@ def test_to_macrolanguage() -> None:
     assert to_macrolanguage("not-a-code") == "not-a-code"
 
 
-def test_language_difficulty(results_dir: Path) -> None:
+def test_language_breakdown(results_dir: Path) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
-    lang = language_difficulty(preds).set_index("language")
+    lang = language_breakdown(preds).set_index("language")
 
     assert list(lang.columns[-3:]) == ["recall:A", "recall:B", "recall:C"]
     assert lang.loc["eng", "n_samples"] == 2
@@ -219,27 +219,27 @@ def test_language_difficulty(results_dir: Path) -> None:
 
     assert lang.loc["fra", "top_confusion_share"] == 0.5
 
-    ordered = language_difficulty(preds)
+    ordered = language_breakdown(preds)
     assert ordered["error_rate"].is_monotonic_decreasing
-    assert set(language_difficulty(preds, min_samples=2)["language"]) == {"eng"}
+    assert set(language_breakdown(preds, min_samples=2)["language"]) == {"eng"}
 
-    collapsed = language_difficulty(preds, collapse_macrolanguages=True).set_index("language")
+    collapsed = language_breakdown(preds, collapse_macrolanguages=True).set_index("language")
     assert collapsed.loc["lvs", "error_rate"] == 0.0
     assert collapsed.loc["lvs", "top_confusion"] is None
 
 
-def test_language_difficulty_reuses_samples(results_dir: Path) -> None:
+def test_language_breakdown_reuses_samples(results_dir: Path) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
-    samples = sample_difficulty(preds)
+    samples = sample_breakdown(preds)
     pd.testing.assert_frame_equal(
-        language_difficulty(preds, samples=samples), language_difficulty(preds)
+        language_breakdown(preds, samples=samples), language_breakdown(preds)
     )
 
 
 def test_gold_mismatch_warns(results_dir: Path, caplog: pytest.LogCaptureFixture) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
     preds.loc[(preds["model_id"] == "B") & (preds["idx"] == 0), "gold"] = "sco"
-    sample_difficulty(preds)
+    sample_breakdown(preds)
     assert "different gold labels" in caplog.text
 
 
@@ -258,7 +258,7 @@ class _FakeDataset:
 
 def test_attach_texts(results_dir: Path, caplog: pytest.LogCaptureFixture) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
-    samples = sample_difficulty(preds)
+    samples = sample_breakdown(preds)
     with_text = attach_texts(samples, _FakeDataset(TEXTS))  # type: ignore[arg-type]
     for idx, text in zip(with_text["idx"], with_text["text"], strict=True):
         assert text == TEXTS[idx]
@@ -280,7 +280,7 @@ def test_attach_texts_by_dataset_id(monkeypatch: pytest.MonkeyPatch, results_dir
     monkeypatch.setattr(
         "commonlid.core.registry.get_dataset", lambda _dataset_id: _FakeDataset(TEXTS)
     )
-    out = attach_texts(sample_difficulty(preds), DATASET)
+    out = attach_texts(sample_breakdown(preds), DATASET)
     assert out["text"].notna().all()
 
 
@@ -291,7 +291,7 @@ def test_attach_texts_by_dataset_id(monkeypatch: pytest.MonkeyPatch, results_dir
 
 def _cli(results_dir: Path, *args: str) -> Any:
     return runner.invoke(
-        app, ["difficulty", "--dataset", DATASET, "--local-dir", str(results_dir), *args]
+        app, ["breakdown", "--dataset", DATASET, "--local-dir", str(results_dir), *args]
     )
 
 
@@ -349,6 +349,19 @@ def test_cli_min_error_rate_and_min_samples(results_dir: Path) -> None:
     assert "3 language row(s)" in result.output
 
 
+def test_cli_easiest_first_and_max_error_rate(results_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "easy.csv"
+    result = _cli(results_dir, "--order", "easiest", "--out", str(out))
+    assert result.exit_code == 0, result.output
+    df = pd.read_csv(out)
+    assert df["error_rate"].is_monotonic_increasing
+    assert df["language"].iloc[0] == "eng"
+
+    capped = _cli(results_dir, "--level", "sample", "--max-error-rate", "0", "--out", str(out))
+    assert capped.exit_code == 0, capped.output
+    assert list(pd.read_csv(out)["idx"]) == [0]
+
+
 def test_cli_with_text(monkeypatch: pytest.MonkeyPatch, results_dir: Path) -> None:
     monkeypatch.setattr(
         "commonlid.core.registry.get_dataset", lambda _dataset_id: _FakeDataset(TEXTS)
@@ -376,7 +389,7 @@ def test_cli_errors(results_dir: Path) -> None:
     assert "unknown metric" in bad_metric.output
 
     no_models = runner.invoke(
-        app, ["difficulty", "--dataset", "missing", "--local-dir", str(results_dir)]
+        app, ["breakdown", "--dataset", "missing", "--local-dir", str(results_dir)]
     )
     assert no_models.exit_code == 1
     assert "No models" in no_models.output

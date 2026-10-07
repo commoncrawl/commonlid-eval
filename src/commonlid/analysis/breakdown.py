@@ -1,14 +1,17 @@
-"""Sample- and language-level difficulty across the top-k models of a dataset.
+"""Sample- and language-level breakdown across the top-k models of a dataset.
 
 The published results dataset stores one ``predictions.jsonl`` per
 ``(dataset, model)`` pair (``idx``, ``text_hash``, ``gold``, ``pred``, ...).
-This module lines those files up by ``idx`` for a handful of models and asks,
-per sample and per gold language, how often the models get it wrong.
+This module lines those files up by ``idx`` for a handful of models and
+reports, per sample and per gold language, how often the models get it right
+or wrong, what they predict instead and how much they agree.
 
-Two readings of the output are useful:
+Useful readings of the output:
 
 - **Hard samples / languages** -- high ``error_rate``: most strong models miss
   them. ``top_confusion`` / ``top_wrong_pred`` names the usual culprit.
+- **Easy samples / languages** -- ``error_rate`` near 0: every model gets
+  them right (``all_correct_share`` at language level).
 - **Annotation-error candidates** -- ``label_suspect``: the models not only
   miss the gold label, they *agree* on a different (non-``und``) one. With
   several strong, independently trained models that is often a sign the gold
@@ -191,13 +194,13 @@ def _top_label(df: Any, key: str, label: str, count_name: str) -> Any:
     return counts.drop_duplicates(key).set_index(key)
 
 
-def sample_difficulty(
+def sample_breakdown(
     preds: Any,
     *,
     suspect_min_agreement: float = DEFAULT_SUSPECT_MIN_AGREEMENT,
     collapse_macrolanguages: bool = False,
 ) -> Any:
-    """Per-sample difficulty across the models present in ``preds``.
+    """Per-sample breakdown across the models present in ``preds``.
 
     ``preds`` is the long frame from :func:`load_predictions`. Samples without
     a gold label are dropped. ``None`` predictions count as ``und`` (the same
@@ -288,7 +291,7 @@ def sample_difficulty(
     return out.reset_index(drop=True)
 
 
-def language_difficulty(
+def language_breakdown(
     preds: Any,
     *,
     samples: Any | None = None,
@@ -296,7 +299,7 @@ def language_difficulty(
     collapse_macrolanguages: bool = False,
     min_samples: int = 1,
 ) -> Any:
-    """Per-gold-language difficulty across the models present in ``preds``.
+    """Per-gold-language breakdown across the models present in ``preds``.
 
     Returned columns (sorted hardest first):
 
@@ -305,12 +308,12 @@ def language_difficulty(
     - ``error_rate`` -- mean per-sample error rate (= 1 - mean model recall)
     - ``all_wrong_share`` / ``all_correct_share`` -- share of samples every
       model got wrong / right
-    - ``n_label_suspect`` -- samples flagged by :func:`sample_difficulty`
+    - ``n_label_suspect`` -- samples flagged by :func:`sample_breakdown`
     - ``top_confusion`` / ``top_confusion_share`` -- most common wrong
       prediction over all (model, sample) pairs and its share of the errors
     - ``recall:<model_id>`` -- each model's recall on this language
 
-    ``samples`` may pass a precomputed :func:`sample_difficulty` frame to avoid
+    ``samples`` may pass a precomputed :func:`sample_breakdown` frame to avoid
     recomputing it (it must use the same ``collapse_macrolanguages``).
     Languages with fewer than ``min_samples`` samples are dropped.
     """
@@ -319,7 +322,7 @@ def language_difficulty(
     df = _prepare(preds, collapse_macrolanguages=collapse_macrolanguages)
     models = _model_order(df)
     if samples is None:
-        samples = sample_difficulty(
+        samples = sample_breakdown(
             preds,
             suspect_min_agreement=suspect_min_agreement,
             collapse_macrolanguages=collapse_macrolanguages,

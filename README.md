@@ -698,19 +698,25 @@ make notebooks      # installs the [notebooks] extra and launches jupyter lab
 See `notebooks/README.md` for what the notebook produces and how to point
 it at your own results directory.
 
-### Hard samples, hard languages and annotation-error candidates
+### Per-sample and per-language breakdown across the top models
 
-`commonlid difficulty` lines up the published `predictions.jsonl` of the
+`commonlid breakdown` lines up the published `predictions.jsonl` of the
 top-k models on a dataset (ranked by a leaderboard metric, `macro_f1` by
-default) and reports what they get wrong most often:
+default) and reports, per sample or per gold language, how often they get it
+right or wrong, what they predict instead and how much they agree. Use it to
+find the hardest (or easiest) languages and samples, and candidate
+annotation errors:
 
 ```bash
-# Languages the 5 best models on CommonLID struggle with most
-commonlid difficulty --dataset commonlid --top-k 5
+# Languages ranked by how often the 5 best models on CommonLID miss them
+commonlid breakdown --dataset commonlid --top-k 5
+
+# ... or the easiest ones first
+commonlid breakdown --dataset commonlid --top-k 5 --order easiest
 
 # Samples where most of the top models agree on a *different* label than
 # the gold one: candidate annotation errors, with the text joined back in
-commonlid difficulty --dataset commonlid --top-k 5 --level sample \
+commonlid breakdown --dataset commonlid --top-k 5 --level sample \
   --only-suspect --collapse-macrolanguages --with-text --out suspects.csv
 ```
 
@@ -724,6 +730,8 @@ commonlid difficulty --dataset commonlid --top-k 5 --level sample \
 - `--collapse-macrolanguages` counts an individual language and its
   macrolanguage (`lvs` / `lav`, `cmn` / `zho`) as a match, which otherwise
   dominate the error lists.
+- `--order hardest|easiest` sorts by `error_rate`; `--min-error-rate` /
+  `--max-error-rate` filter on it.
 - `--model X --model Y` picks models explicitly instead of `--top-k`;
   `--exclude-model` drops one from the ranking. `--local-dir ./results`
   reads a local results directory instead of the Hub.
@@ -734,14 +742,14 @@ The same functions are available from Python (`commonlid.analysis`):
 
 ```python
 from commonlid.analysis import (
-    language_difficulty, load_predictions, sample_difficulty, select_top_models,
+    language_breakdown, load_predictions, sample_breakdown, select_top_models,
 )
 from commonlid.leaderboard import load_results
 
 models = select_top_models(load_results(allowed_datasets=["commonlid"]), "commonlid", k=5)
 preds = load_predictions("commonlid", models)
-samples = sample_difficulty(preds, collapse_macrolanguages=True)
-languages = language_difficulty(preds, samples=samples, collapse_macrolanguages=True)
+samples = sample_breakdown(preds, collapse_macrolanguages=True)
+languages = language_breakdown(preds, samples=samples, collapse_macrolanguages=True)
 ```
 
 ## Hugging Face Space
