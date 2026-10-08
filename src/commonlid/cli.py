@@ -11,6 +11,7 @@ import json
 import logging
 import sys
 from collections.abc import Iterator
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -634,6 +635,230 @@ def export_csv(
         for row in rows:
             writer.writerow(row)
     typer.echo(f"Wrote {len(rows)} rows to {out}")
+
+
+class BreakdownLevel(str, Enum):
+    sample = "sample"
+    language = "language"
+
+
+class SortOrder(str, Enum):
+    desc = "desc"
+    asc = "asc"
+
+
+@app.command("breakdown")
+def breakdown(
+    dataset: Annotated[
+        str, typer.Option("--dataset", help="Dataset id in the results repo (e.g. commonlid).")
+    ],
+    level: Annotated[
+        BreakdownLevel,
+        typer.Option("--level", help="Aggregate per sample or per gold language."),
+    ] = BreakdownLevel.language,
+    top_k: Annotated[
+        int, typer.Option("--top-k", "-k", help="Use the k best models on this dataset.")
+    ] = 5,
+    metric: Annotated[
+        str,
+        typer.Option("--metric", help="Leaderboard column used to rank models (e.g. macro_f1)."),
+    ] = "macro_f1",
+    models: Annotated[
+        list[str] | None,
+        typer.Option("--model", help="Explicit model id (repeatable); overrides --top-k."),
+    ] = None,
+    exclude_models: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-model", help="Model id to leave out of the top-k (repeatable)."),
+    ] = None,
+    repo_id: Annotated[
+        str, typer.Option("--repo-id", help="HF dataset repo id holding the results.")
+    ] = "commoncrawl/commonlid-results",
+    revision: Annotated[
+        str | None,
+        typer.Option("--revision", help="Optional commit SHA / branch / tag to pin."),
+    ] = None,
+    cache_dir: Annotated[
+        Path | None,
+        typer.Option("--cache-dir", help="Override the HF snapshot cache directory."),
+    ] = None,
+    local_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--local-dir",
+            help="Skip the network and read results from this local directory instead.",
+        ),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Write the full table here (.csv, .jsonl or .parquet)."),
+    ] = None,
+    show: Annotated[int, typer.Option("--show", help="Rows to print to stdout (0 = none).")] = 20,
+    sort_by: Annotated[
+        str,
+        typer.Option(
+            "--sort-by",
+            help="Column to sort by, e.g. error_rate or agreement (any output column works).",
+        ),
+    ] = "error_rate",
+    order: Annotated[
+        SortOrder,
+        typer.Option("--order", help="desc = highest values first, asc = lowest first."),
+    ] = SortOrder.desc,
+    min_error_rate: Annotated[
+        float,
+        typer.Option("--min-error-rate", help="Keep only rows with error_rate >= this value."),
+    ] = 0.0,
+    max_error_rate: Annotated[
+        float,
+        typer.Option("--max-error-rate", help="Keep only rows with error_rate <= this value."),
+    ] = 1.0,
+    only_suspect: Annotated[
+        bool,
+        typer.Option(
+            "--only-suspect",
+            help="Sample level: keep only likely annotation errors (label_suspect).",
+        ),
+    ] = False,
+    suspect_min_agreement: Annotated[
+        float,
+        typer.Option(
+            "--suspect-min-agreement",
+            help="Share of models that must agree on the same non-gold label to flag a sample.",
+        ),
+    ] = 0.8,
+    min_samples: Annotated[
+        int,
+        typer.Option("--min-samples", help="Language level: drop languages with fewer samples."),
+    ] = 1,
+    collapse_macrolanguages: Annotated[
+        bool,
+        typer.Option(
+            "--collapse-macrolanguages",
+            help="Count an individual language and its macrolanguage (lvs/lav) as a match.",
+        ),
+    ] = False,
+    with_text: Annotated[
+        bool,
+        typer.Option(
+            "--with-text",
+            help="Sample level: join the text back in from the registered dataset (downloads it).",
+        ),
+    ] = False,
+) -> None:
+    """Break down how the top-k models do per sample or per gold language.
+
+    Uses the per-sample predictions published in the results HF dataset and
+    reports error rates, confusions and model agreement, sorted by
+    ``--sort-by`` (default: highest ``error_rate`` first). Samples where most models agree on
+    a different label than the gold one are flagged as ``label_suspect``
+    (candidate annotation errors).
+    """
+    import pandas as pd
+
+    from commonlid.analysis import (
+        attach_texts,
+        language_breakdown,
+        load_predictions,
+        sample_breakdown,
+        select_top_models,
+    )
+    from commonlid.leaderboard.data import load_results
+
+    if models:
+        selected = list(dict.fromkeys(models))
+    else:
+        results = load_results(
+            repo_id,
+            revision=revision,
+            cache_dir=cache_dir,
+            allowed_datasets=[dataset],
+            local_dir=local_dir,
+        )
+        try:
+            selected = select_top_models(
+                results, dataset, top_k, metric=metric, exclude=exclude_models
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+    if not selected:
+        typer.echo(f"No models with results for dataset {dataset!r}.", err=True)
+        raise typer.Exit(code=1)
+
+    preds = load_predictions(
+        dataset,
+        selected,
+        repo_id=repo_id,
+        revision=revision,
+        cache_dir=cache_dir,
+        local_dir=local_dir,
+    )
+    if preds.empty:
+        typer.echo(f"No predictions found for {selected} on {dataset!r}.", err=True)
+        raise typer.Exit(code=1)
+    used = list(dict.fromkeys(preds["model_id"]))
+    typer.echo(f"Models ({len(used)}): {', '.join(used)}", err=True)
+
+    samples = sample_breakdown(
+        preds,
+        suspect_min_agreement=suspect_min_agreement,
+        collapse_macrolanguages=collapse_macrolanguages,
+    )
+    if level is BreakdownLevel.sample:
+        table = samples
+        if only_suspect:
+            table = table[table["label_suspect"]]
+    else:
+        table = language_breakdown(
+            preds,
+            samples=samples,
+            collapse_macrolanguages=collapse_macrolanguages,
+            min_samples=min_samples,
+        )
+    table = table[table["error_rate"].between(min_error_rate, max_error_rate)]
+    if sort_by not in table.columns:
+        typer.echo(
+            f"unknown --sort-by column {sort_by!r}; available: {list(table.columns)}", err=True
+        )
+        raise typer.Exit(code=2)
+    # Stable, so ties keep the default order (error_rate desc, then agreement / size).
+    table = table.sort_values(sort_by, ascending=order is SortOrder.asc, kind="stable")
+    table = table.reset_index(drop=True)
+    if with_text and level is BreakdownLevel.sample:
+        try:
+            table = attach_texts(table, dataset)
+        except Exception as exc:
+            typer.echo(f"Could not attach texts for {dataset!r}: {exc}", err=True)
+
+    typer.echo(f"{len(table)} {level.value} row(s)", err=True)
+    if show > 0 and not table.empty:
+        with pd.option_context("display.max_columns", None, "display.width", 200):
+            preview = table.head(show)
+            if "text" in preview.columns:
+                preview = preview.assign(text=preview["text"].map(_preview_text))
+            typer.echo(preview.to_string(index=False, float_format="{:.3f}".format))
+    if out is not None:
+        _write_table(table, out)
+        typer.echo(f"Wrote {len(table)} row(s) to {out}", err=True)
+
+
+def _preview_text(text: str | None, width: int = 60) -> str:
+    if text is None:
+        return ""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= width else flat[: width - 1] + "…"
+
+
+def _write_table(table: Any, out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    suffix = out.suffix.lower()
+    if suffix == ".jsonl":
+        table.to_json(out, orient="records", lines=True, force_ascii=False)
+    elif suffix == ".parquet":
+        table.to_parquet(out, index=False)
+    else:
+        table.to_csv(out, index=False)
 
 
 def _read_lines(path: Path) -> list[str]:
