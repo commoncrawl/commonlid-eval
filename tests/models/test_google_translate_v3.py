@@ -150,17 +150,18 @@ def test_predict_conforms_and_keeps_confidence() -> None:
     model = _loaded_model(client, max_workers=1)
 
     assert model.predict_scored(["english", "chinese", "tagalog", "nothing"]) == [
-        LIDPrediction("eng", 0.98),
-        LIDPrediction("zho", 1.0),
-        LIDPrediction("tgl", 0.9),
-        LIDPrediction(None, None),
+        LIDPrediction("eng", 0.98, raw="en"),
+        LIDPrediction("zho", 1.0, raw="zh-CN"),
+        LIDPrediction("tgl", 0.9, raw="tl"),
+        # No candidate languages at all: the model gave no output.
+        LIDPrediction(None, None, raw=None),
     ]
 
 
 def test_confidence_survives_an_unmappable_code() -> None:
     client = _FakeClient(responses=[_FakeResponse([_FakeLanguage("zzzz", 0.4)])])
     model = _loaded_model(client, max_workers=1)
-    assert model.predict_scored(["gibberish"]) == [LIDPrediction(None, 0.4)]
+    assert model.predict_scored(["gibberish"]) == [LIDPrediction(None, 0.4, raw="zzzz")]
 
 
 def test_blank_text_never_reaches_the_api() -> None:

@@ -138,19 +138,19 @@ class GoogleTranslateV3Model(LIDModel):
         # request still counts against the per-character bill.
         content = text.strip()
         if not content:
-            return LIDPrediction(None, None)
+            return LIDPrediction(None, None, raw=None)
         response = self._call_with_retry(content[: self._MAX_CHARS_PER_TEXT])
         languages = getattr(response, "languages", None) or []
         if not languages:
-            return LIDPrediction(None, None)
+            return LIDPrediction(None, None, raw=None)
         top = languages[0]
         score = float(top.confidence) if top.confidence is not None else None
         code = top.language_code
         if not code:
-            return LIDPrediction(None, score)
+            return LIDPrediction(None, score, raw=code or None)
         # v3 emits BCP-47, so `zh-CN` / `zh-TW` collapse to `zh` before the
         # ISO 639-3 upgrade in `LIDModel._conform`, as in `cld3.py`.
-        return LIDPrediction(code.split("-")[0], score)
+        return LIDPrediction(code.split("-")[0], score, raw=code)
 
     def _call_with_retry(self, content: str) -> Any:
         from google.api_core import exceptions as gexc

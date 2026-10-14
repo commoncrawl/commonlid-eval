@@ -26,3 +26,9 @@ def test_returns_none_for_gibberish() -> None:
     preds = m.predict(["xxxxxxxxxxxxxxxx"])
     # xxxxx should produce one of the sentinel codes -> None.
     assert preds == [None]
+
+
+def test_raw_output_keeps_the_sentinel_code() -> None:
+    [pred] = CLD2Model().predict_scored(["xxxxxxxxxxxxxxxx"])
+    assert pred.iso639_3 is None
+    assert pred.raw == "un"

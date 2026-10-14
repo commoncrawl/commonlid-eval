@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from commonlid.core.lid_model import LIDModel, LIDPrediction
+from commonlid.core.lid_model import RAW_UNSET, LIDModel, LIDPrediction
 
 
 class _Echo(LIDModel):
@@ -96,7 +96,8 @@ def test_predict_scored_defaults_to_a_none_score() -> None:
         def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
             return ["en"] * len(texts)
 
-    assert Bare().predict_scored(["anything"]) == [LIDPrediction("eng", None)]
+    # A bare code is also the raw output.
+    assert Bare().predict_scored(["anything"]) == [LIDPrediction("eng", None, raw="en")]
 
 
 def test_predict_scored_keeps_a_reported_confidence() -> None:
@@ -144,10 +145,32 @@ def test_predict_scored_accepts_a_mixed_batch() -> None:
             return ["en", LIDPrediction("de", 0.5), None]
 
     assert Mixed().predict_scored(["a", "b", "c"]) == [
-        LIDPrediction("eng", None),
+        LIDPrediction("eng", None, raw="en"),
+        # A scored prediction without `raw` leaves the raw output unknown.
         LIDPrediction("deu", 0.5),
-        LIDPrediction(None, None),
+        LIDPrediction(None, None, raw=None),
     ]
+
+
+def test_predict_scored_keeps_the_raw_output() -> None:
+    """A backend's raw label survives conformance untouched."""
+
+    class Raw(LIDModel):
+        model_id = "_raw"
+
+        def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+            return [LIDPrediction("en", 0.5, raw="__label__en_Latn")] * len(texts)
+
+    [pred] = Raw().predict_scored(["anything"])
+    assert pred == LIDPrediction("eng", 0.5, raw="__label__en_Latn")
+    assert pred.has_raw
+
+
+def test_raw_output_defaults_to_unknown() -> None:
+    """Unknown (`RAW_UNSET`) is distinct from "no output" (`None`)."""
+    assert LIDPrediction("eng", 0.9).raw is RAW_UNSET
+    assert not LIDPrediction("eng", 0.9).has_raw
+    assert LIDPrediction(None, None, raw=None).has_raw
 
 
 def test_lid_prediction_is_frozen() -> None:

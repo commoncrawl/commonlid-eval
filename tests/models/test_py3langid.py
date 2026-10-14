@@ -54,3 +54,12 @@ def test_min_confidence_is_in_effect() -> None:
     m = Py3LangIDModel()
     m.load()
     assert m._identifier.min_confidence == _MIN_CONFIDENCE
+
+
+def test_raw_output_is_the_code_before_mapping() -> None:
+    arabic, digits = Py3LangIDModel().predict_scored([
+        "هذا نص قصير مكتوب باللغة العربية الفصحى الحديثة.",
+        "123 456",
+    ])
+    assert (arabic.iso639_3, arabic.raw) == ("arb", "ar")
+    assert (digits.iso639_3, digits.raw) == (None, "und")

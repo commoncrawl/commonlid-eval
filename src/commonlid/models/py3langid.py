@@ -36,7 +36,7 @@ class Py3LangIDModel(LIDModel):
         for text in texts:
             code, score = self._identifier.classify(text)
             label = None if code in ("zxx", "und") else _OUT_MAP.get(code, code)
-            out.append(LIDPrediction(label, float(score)))
+            out.append(LIDPrediction(label, float(score), raw=code))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:

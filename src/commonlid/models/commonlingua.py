@@ -105,7 +105,7 @@ class CommonLinguaModel(LIDModel):
                 indices = pred_idx.cpu().tolist()
                 scores = top_prob.cpu().tolist()
             results.extend(
-                LIDPrediction(self._idx2lang[int(i)], float(p))
+                LIDPrediction(self._idx2lang[int(i)], float(p), raw=self._idx2lang[int(i)])
                 for i, p in zip(indices, scores, strict=True)
             )
         return results

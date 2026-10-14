@@ -15,12 +15,47 @@ from commonlid.cost.usage import Range, Usage
 from commonlid.preprocess import conform_langcode, openlid_normer_clean_line
 
 
+class _RawUnset:
+    """Type of :data:`RAW_UNSET`; a singleton marking an unknown raw output."""
+
+    _instance: ClassVar[_RawUnset | None] = None
+
+    def __new__(cls) -> _RawUnset:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "RAW_UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+RAW_UNSET = _RawUnset()
+"""Raw output is unknown (e.g. a cache entry written before raw outputs were kept).
+
+Distinct from ``None``, which means the model produced no output at all.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class LIDPrediction:
-    """A single prediction: ISO 639-3 code (or ``None`` for "und") and optional score."""
+    """A single prediction: ISO 639-3 code (or ``None`` for "und") and optional score.
+
+    ``raw`` is the verbatim label the backend reported before any
+    normalisation (e.g. ``"__label__eng_Latn"``, ``"zh-CN"``), ``None`` when
+    the model produced no output, or :data:`RAW_UNSET` when it is unknown.
+    """
 
     iso639_3: str | None
     score: float | None = None
+    raw: str | _RawUnset | None = RAW_UNSET
+
+    @property
+    def has_raw(self) -> bool:
+        """Whether the raw output is known (it may still be ``None``)."""
+        return self.raw is not RAW_UNSET
 
 
 class LIDModel(ABC):
@@ -63,7 +98,11 @@ class LIDModel(ABC):
 
         Return a raw language code, ``None`` for "undetermined", or a
         :class:`LIDPrediction` when the backend also reports a confidence.
-        Returning a bare code is equivalent to a prediction with no score.
+        Returning a bare code is equivalent to a prediction with no score,
+        and the code is kept as the raw output. A backend that rewrites the
+        library's label (strips a script suffix, maps a code, turns "und"
+        into ``None``) should return a :class:`LIDPrediction` with ``raw``
+        set to the label exactly as the library reported it.
         """
 
     def predict(self, texts: Sequence[str]) -> list[str | None]:
@@ -90,10 +129,14 @@ class LIDModel(ABC):
 
     @classmethod
     def _as_prediction(cls, raw: str | LIDPrediction | None) -> LIDPrediction:
-        """Normalise one ``_predict_batch`` entry into a conformed prediction."""
+        """Normalise one ``_predict_batch`` entry into a conformed prediction.
+
+        A bare code (or ``None``) is its own raw output. A
+        :class:`LIDPrediction` keeps whatever raw output the backend set.
+        """
         if isinstance(raw, LIDPrediction):
-            return LIDPrediction(cls._conform(raw.iso639_3), raw.score)
-        return LIDPrediction(cls._conform(raw), None)
+            return LIDPrediction(cls._conform(raw.iso639_3), raw.score, raw.raw)
+        return LIDPrediction(cls._conform(raw), None, raw)
 
     def estimate_usage(self, texts: Sequence[str]) -> Usage | None:
         """Count the billable usage of predicting ``texts``, without calling anything.

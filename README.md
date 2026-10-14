@@ -98,14 +98,16 @@ Ad-hoc prediction on a single string — no dataset, no result files:
 
 ```bash
 commonlid predict --model GlotLID --text "Le chat dort sur le canapé."
-# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": null, "model": "GlotLID"}
+# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": null, "pred_raw": "__label__fra_Latn", "model": "GlotLID"}
 ```
 
-`score` carries the model's own confidence where it reports one:
+`pred_raw` is the label exactly as the model reported it, before it was
+conformed to ISO 639-3 (see [Raw model output](#raw-model-output)). `score`
+carries the model's own confidence where it reports one:
 
 ```bash
 commonlid predict --model cld3 --text "Le chat dort sur le canapé."
-# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": 1.0, "model": "cld3"}
+# {"text": "Le chat dort sur le canapé.", "pred": "fra", "score": 1.0, "pred_raw": "fr", "model": "cld3"}
 ```
 
 Pipe a file through a model (use `-` for stdin):
@@ -532,6 +534,36 @@ To expose a score from a new model, return `LIDPrediction` objects from
 `_predict_batch` instead of bare codes. The two are interchangeable within a
 single batch, so wrappers that have no confidence need no changes.
 
+## Raw model output
+
+`pred` is always a conformed ISO 639-3 code: script and region suffixes are
+dropped, ISO 639-1/2 codes are upgraded, and deprecated or unknown codes
+become `null`. `LIDPrediction.raw`, written as `pred_raw`, keeps the label the
+model actually returned, for analysing what normalisation did:
+
+| `model_id` | Example `pred_raw` | Becomes `pred` |
+|---|---|---|
+| `GlotLID`, `OpenLID-v2`, `fasttext` | `__label__eng_Latn` | `eng` |
+| `cld2` | `zh-Hant`, `un` | `zho`, `null` |
+| `cld3` | `bg-Latn`, `und` | `bul`, `null` |
+| `py3langid` | `ar`, `und` | `arb`, `null` |
+| `GoogleTranslate-v2`, `GoogleTranslate-v3` | `zh-CN` | `zho` |
+| `dspy:*` LLMs | the answer field as written, e.g. `nah`, `hindi` | `nah`, `null` |
+
+`pred_raw` has three states, and readers should keep them apart:
+
+* a string: the model's output;
+* `null`: the model produced no output (e.g. blank input never sent to an API,
+  or a failed LLM call);
+* **key absent**: unknown. Results and cache entries written before raw
+  outputs were recorded have no `pred_raw`.
+
+`commonlid run --refresh-raw` re-predicts cached entries that have no raw
+output and logs a warning if any fresh prediction differs from the cached one.
+The legacy GPT results were backfilled from the original DSPy caches with
+`scripts/backfill_pred_raw.py`; rows whose cache entry could not be matched
+to the stored prediction keep no `pred_raw`.
+
 ## Adding a new model
 
 A guide for adding a new model can be found [here](docs/contributing/adding_a_model.md).
@@ -643,11 +675,13 @@ Each `(model, dataset)` run produces two files.
 One line per sample:
 
 ```json
-{"idx": 0, "text_hash": "abcd1234efgh5678", "gold": "eng", "pred": "eng", "score": 0.98, "correct": true}
+{"idx": 0, "text_hash": "abcd1234efgh5678", "gold": "eng", "pred": "eng", "score": 0.98, "pred_raw": "en", "correct": true}
 ```
 
 `score` is the model's own confidence, or `null` for models that report
-none. See [Confidence scores](#confidence-scores).
+none. See [Confidence scores](#confidence-scores). `pred_raw` is the
+model's output before normalisation; it is `null` when the model produced
+none and absent when unknown. See [Raw model output](#raw-model-output).
 
 ## Analysis
 

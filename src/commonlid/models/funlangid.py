@@ -33,13 +33,16 @@ class FunLangIDModel(LIDModel):
             # classifier scores each candidate as the fraction of the text's
             # 4-grams that its lexicon covers, so scores do not sum to 1.
             ranked = self._classifier.predict(text, 1)
-            if not ranked or not ranked[0][1]:
-                out.append(LIDPrediction(None, None))
+            if not ranked:
+                out.append(LIDPrediction(None, None, raw=None))
+                continue
+            if not ranked[0][1]:
+                out.append(LIDPrediction(None, None, raw=ranked[0][0]))
                 continue
             raw, score = ranked[0]
             # Output is BCP-47 like 'lang-script'.
             code = raw.split("-")[0]
-            out.append(LIDPrediction(None if code == "und" else code, float(score)))
+            out.append(LIDPrediction(None if code == "und" else code, float(score), raw=raw))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:

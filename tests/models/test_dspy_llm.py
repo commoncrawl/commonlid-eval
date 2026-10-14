@@ -43,7 +43,7 @@ def test_predict_batch_goes_through_batched_predict(monkeypatch: pytest.MonkeyPa
         captured["n_examples"] = len(examples)
         captured["batch_size"] = batch_size
         captured["n_threads"] = n_threads
-        return pd.DataFrame({"language_iso639_3": ["eng", "deu"]})
+        return pd.DataFrame({"language_iso639_3": [" eng\n", "deu"]})
 
     def fake_load_self(self: DSPyLLMModel) -> None:
         self._module = object()  # only tested via reference
@@ -55,8 +55,10 @@ def test_predict_batch_goes_through_batched_predict(monkeypatch: pytest.MonkeyPa
     model = DSPyLLMModel(
         llm_model_name="azure/gpt", api_base="https://example", batch_size=50, n_threads=2
     )
-    preds = model.predict(["hi", "tag"])
-    assert preds == ["eng", "deu"]
+    preds = model.predict_scored(["hi", "tag"])
+    assert [p.iso639_3 for p in preds] == ["eng", "deu"]
+    # The raw output is the field exactly as the LLM wrote it.
+    assert [p.raw for p in preds] == [" eng\n", "deu"]
     assert captured["batch_size"] == 50
     assert captured["n_threads"] == 2
 
@@ -67,6 +69,8 @@ def test_coerce_strips_and_nones_empty() -> None:
     assert DSPyLLMModel._coerce("  eng  ") == "eng"
     assert DSPyLLMModel._coerce("") is None
     assert DSPyLLMModel._coerce(None) is None
+    # A failed call leaves NaN in the cached column.
+    assert DSPyLLMModel._coerce(float("nan")) is None
 
 
 def test_requires_preprocessing_is_false() -> None:
