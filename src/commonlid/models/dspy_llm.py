@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.cost.rate_cards import litellm_rate_card
 from commonlid.cost.usage import (
     INPUT_TOKENS,
@@ -175,7 +175,7 @@ class DSPyLLMModel(LIDModel):
             kwargs["max_completion_tokens"] = self.max_completion_tokens
         return dspy.LM(**kwargs)
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
         import dspy
 
         assert self._module is not None  # load() has run
@@ -187,7 +187,12 @@ class DSPyLLMModel(LIDModel):
             n_threads=self.n_threads,
             cache_path=self._cache_path(texts),
         )
-        return [self._coerce(code) for code in df["language_iso639_3"].tolist()]
+        # The raw output is the parsed field as the LLM wrote it, before
+        # stripping; a failed call leaves NaN in the column, i.e. no output.
+        return [
+            LIDPrediction(self._coerce(code), None, raw=code if isinstance(code, str) else None)
+            for code in df["language_iso639_3"].tolist()
+        ]
 
     def _estimate_usage(self, texts: Sequence[str]) -> Usage:
         """Count prompt tokens with the model's own tokenizer, via LiteLLM.
@@ -245,8 +250,8 @@ class DSPyLLMModel(LIDModel):
         return [_usage_from_response(entry.get("usage") or {}) for entry in self._lm.history]
 
     @staticmethod
-    def _coerce(code: str | None) -> str | None:
-        if code is None:
+    def _coerce(code: object) -> str | None:
+        if not isinstance(code, str):
             return None
         code = code.strip()
         if not code:

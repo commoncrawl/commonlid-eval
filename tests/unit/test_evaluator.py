@@ -130,3 +130,80 @@ def test_limit_truncates_dataset(tmp_output_dir: Path) -> None:
         (tmp_output_dir / "_fake" / "_always_eng" / "predictions.jsonl").read_text().splitlines()
     )
     assert len(lines) == 2
+
+
+def _rows(output_dir: Path, model_id: str) -> list[dict[str, object]]:
+    path = output_dir / "_fake" / model_id / "predictions.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_predictions_record_the_raw_output(tmp_output_dir: Path) -> None:
+    class _TwoLetter(LIDModel):
+        model_id = "_two_letter"
+
+        def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+            return ["en"] * len(texts)
+
+    Evaluator(models=[_TwoLetter()], datasets=[_FakeDataset()], output_dir=tmp_output_dir).run()
+    rows = _rows(tmp_output_dir, "_two_letter")
+    assert {(r["pred"], r["pred_raw"]) for r in rows} == {("eng", "en")}
+
+
+def _write_legacy_cache(output_dir: Path, model: LIDModel) -> None:
+    """Cache every sample the way an older commonlid did: without ``pred_raw``."""
+    from commonlid.evaluation.cache import _digest
+
+    path = output_dir / ".cache" / "_fake" / f"{model.model_id}.jsonl"
+    path.parent.mkdir(parents=True)
+    with path.open("w", encoding="utf-8") as f:
+        for sample in _FakeDataset.SAMPLES:
+            key = _digest(model.model_id, _FakeDataset.source_hf_revision, sample["text"])
+            f.write(json.dumps({"text_hash": key, "pred": sample["iso639_3"], "score": None}))
+            f.write("\n")
+
+
+def test_legacy_cache_hits_leave_the_raw_output_out(tmp_output_dir: Path) -> None:
+    model = _PerfectOracle()
+    _write_legacy_cache(tmp_output_dir, model)
+    Evaluator(models=[model], datasets=[_FakeDataset()], output_dir=tmp_output_dir).run()
+    rows = _rows(tmp_output_dir, "_oracle")
+    assert len(rows) == len(_FakeDataset.SAMPLES)
+    assert all("pred_raw" not in r for r in rows)
+
+
+def test_refresh_raw_repredicts_legacy_cache_hits(
+    tmp_output_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    model = _PerfectOracle()
+    _write_legacy_cache(tmp_output_dir, model)
+    Evaluator(
+        models=[model], datasets=[_FakeDataset()], output_dir=tmp_output_dir, refresh_raw=True
+    ).run()
+    rows = _rows(tmp_output_dir, "_oracle")
+    assert all(r["pred_raw"] == r["pred"] for r in rows)
+    assert "differ from the cached ones" not in caplog.text
+
+    # The refreshed entries are now cached with their raw output.
+    class _Broken(_PerfectOracle):
+        def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+            return ["xxx"] * len(texts)
+
+    Evaluator(
+        models=[_Broken()], datasets=[_FakeDataset()], output_dir=tmp_output_dir, refresh_raw=True
+    ).run()
+    assert _rows(tmp_output_dir, "_oracle") == rows
+
+
+def test_refresh_raw_warns_when_predictions_drift(
+    tmp_output_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _write_legacy_cache(tmp_output_dir, _PerfectOracle())
+
+    class _Drifted(_PerfectOracle):
+        def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+            return ["eng"] * len(texts)
+
+    Evaluator(
+        models=[_Drifted()], datasets=[_FakeDataset()], output_dir=tmp_output_dir, refresh_raw=True
+    ).run()
+    assert "3 of 4 refreshed prediction(s) differ from the cached ones" in caplog.text

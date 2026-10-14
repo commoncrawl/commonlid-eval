@@ -8,7 +8,7 @@ top-level `README.md`.
 ```
 src/commonlid/
 ├── core/               # Abstract base classes + decorator registry
-│   ├── lid_model.py        # LIDModel ABC, LIDPrediction (code + score), _conform
+│   ├── lid_model.py        # LIDModel ABC, LIDPrediction (code + score + raw), _conform
 │   ├── lid_dataset.py      # LIDDataset ABC, pinned HF revision, iter_batches
 │   └── registry.py         # @register_model / @register_dataset
 ├── models/                 # One submodule per LID model; auto-registered
@@ -25,7 +25,7 @@ src/commonlid/
 ├── evaluation/
 │   ├── evaluator.py        # cartesian product (models x datasets) → files
 │   ├── results.py          # Result dataclass, summary.json, predictions.jsonl
-│   └── cache.py            # Per-(model, dataset) text-hash-keyed cache (code + score)
+│   └── cache.py            # Per-(model, dataset) text-hash-keyed cache (code + score + raw)
 ├── metrics/
 │   ├── core.py             # compute_per_language_metrics, LanguageMetrics
 │   ├── aggregate.py        # macro_average / micro_average (gold-only + observed views)
@@ -84,7 +84,9 @@ Every shipped model flows through:
 2. **(optional) preprocess:** `openlid_normer_clean_line` unless
    `requires_preprocessing = False`. (LLMs skip it.)
 3. **`_predict_batch`** (abstract): subclass returns one raw code (or
-   `None`) per input.
+   `None`, or a `LIDPrediction` with a score and the library's verbatim
+   label as `raw`) per input. The raw label is kept untouched through the
+   next step and written as `pred_raw`.
 4. **`_conform`:**
    - Map via the hand-written deprecation table
      (`preprocess.langcodes.conform_langcode`): e.g. `jw` → `jav`, `iw` →

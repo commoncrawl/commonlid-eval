@@ -1,11 +1,17 @@
 """Per-(model, dataset) prediction cache.
 
 The cache is a JSONL file under ``{cache_dir}/{dataset_id}/{model_id}.jsonl``.
-Each line is ``{"text_hash": "...", "pred": "..." | null, "score": 0.9 | null}``.
-The hash key is ``sha256(model_id || dataset_revision || text)[:16]`` so the
-cache invalidates automatically when a dataset revision is bumped or the model
-changes identity. ``score`` was added later, so entries written before it are
-read back with a ``None`` score rather than being discarded.
+Each line is ``{"text_hash": "...", "pred": "..." | null, "score": 0.9 | null,
+"pred_raw": "..." | null}``. The hash key is
+``sha256(model_id || dataset_revision || text)[:16]`` so the cache invalidates
+automatically when a dataset revision is bumped or the model changes identity.
+
+``score`` and ``pred_raw`` were added later. Entries written before them are
+read back with a ``None`` score and an unknown raw output
+(:data:`~commonlid.core.lid_model.RAW_UNSET`) rather than being discarded.
+``pred_raw`` is only written when the raw output is known, so a missing key
+means "unknown" while ``null`` means "the model produced no output". When a
+text appears on several lines, the last one wins.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from commonlid.core.lid_model import LIDPrediction
+from commonlid.core.lid_model import RAW_UNSET, LIDPrediction
 
 
 def _digest(model_id: str, dataset_revision: str | None, text: str) -> str:
@@ -48,7 +54,10 @@ class PredictionCache:
                 if not line:
                     continue
                 entry = json.loads(line)
-                self._store[entry["text_hash"]] = LIDPrediction(entry["pred"], entry.get("score"))
+                raw = entry.get("pred_raw", RAW_UNSET)
+                self._store[entry["text_hash"]] = LIDPrediction(
+                    entry["pred"], entry.get("score"), raw
+                )
 
     def get(self, text: str) -> tuple[bool, LIDPrediction]:
         """Return ``(hit, prediction)``; the prediction is empty when ``hit`` is ``False``."""
@@ -67,13 +76,14 @@ class PredictionCache:
             for text, pred in pairs:
                 key = _digest(self._model_id, self._dataset_revision, text)
                 self._store[key] = pred
-                f.write(
-                    json.dumps({
-                        "text_hash": key,
-                        "pred": pred.iso639_3,
-                        "score": pred.score,
-                    })
-                )
+                row: dict[str, object] = {
+                    "text_hash": key,
+                    "pred": pred.iso639_3,
+                    "score": pred.score,
+                }
+                if pred.has_raw:
+                    row["pred_raw"] = pred.raw
+                f.write(json.dumps(row))
                 f.write("\n")
 
     @property
