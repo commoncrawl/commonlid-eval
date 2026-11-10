@@ -1,0 +1,33 @@
+# Example config for `commonlid serve --config docs/eval_server.example.toml`.
+# List every metric name you can expose with `commonlid list-server-metrics`.
+
+# Total accepted submissions across all datasets (default 10; 0 = unlimited).
+# Malformed and over-budget submissions are rejected and do not count.
+max_submissions = 10
+
+# Submission counter, shuffle seed and an archive of every submission
+# (full summary.json + predictions.jsonl with gold labels). Keep it outside
+# anything the agent can read. Relative paths resolve against this file.
+state_dir = "./eval-server-state"
+
+# Decimal places of returned scores. Coarser scores leak less per submission.
+round_digits = 4
+
+# Serve items in a seeded random order under opaque ids, so dataset order
+# (often grouped by language) does not hint at labels. Leave shuffle_seed
+# unset to generate one on first start and keep it in state_dir.
+shuffle = true
+
+host = "127.0.0.1"
+port = 8000
+
+[[datasets]]
+id = "commonlid"
+metrics = ["macro.f1_gold_only"]
+max_submissions = 3          # optional cap for this dataset on top of the global one
+
+[[datasets]]
+id = "flores_dev"
+limit = 2000                 # optional: serve and score only the first N samples
+# Per-language metrics reveal which languages the gold set contains.
+metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]

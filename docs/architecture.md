@@ -31,6 +31,10 @@ src/commonlid/
 │   ├── aggregate.py        # macro_average / micro_average (gold-only + observed views)
 │   ├── fpr.py              # false_positive_rate, stats_per_model_supported
 │   └── support_matrix.py   # CSV load/save of language x model support
+├── server/                 # Scoring server (extra `commonlid[server]`), see docs/eval_server.md
+│   ├── config.py           # TOML config: datasets, exposed metrics, submission limits
+│   ├── service.py          # ScoringService: label-free inputs, scoring, budget, state
+│   └── app.py              # FastAPI routes over ScoringService
 ├── leaderboard/            # Optional gradio app (extra `commonlid[leaderboard]`)
 │   ├── app.py              # build_app() — tabs per dataset + drilldowns
 │   └── data.py             # LeaderboardRow, load_results() (HF dataset / local dir)
@@ -44,7 +48,7 @@ src/commonlid/
 │   └── fun_langid.py       # Vendored simple char-4gram LID (1.7k lines of tables)
 ├── cli.py                  # Typer app: version, list-models, list-datasets, run,
 │                           # predict, generate-support-matrix, export-csv,
-│                           # leaderboard {serve,upload}
+│                           # serve, list-server-metrics, leaderboard {serve,upload}
 ├── logging.py
 └── py.typed
 ```
