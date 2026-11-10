@@ -43,6 +43,7 @@ pip install "commonlid[commonlingua]"      # + torch for the CommonLingua byte-l
 pip install "commonlid[google-translate]"  # + the Google Cloud Translation client
 pip install "commonlid[cld3]"              # + cld3-py for the CLD3 model
 pip install "commonlid[leaderboard]"       # + gradio for the leaderboard app
+pip install "commonlid[server]"            # + fastapi/uvicorn for the scoring server
 pip install "commonlid[notebooks]"         # + jupyterlab + matplotlib for paper_tables.ipynb
 pip install "commonlid[all]"               # every optional extra above
 ```
@@ -196,6 +197,31 @@ Prediction caches are ignored too, so the estimate is for a run from scratch.
 
 Hardware throughput from `--calibrate` is measured on the machine running
 the command, so it only applies to `--hardware` if that is the same hardware.
+
+## Scoring an agent without exposing labels
+
+`commonlid serve` runs a scoring server for evaluating an agent (or any
+external system) without giving it the gold labels. The server holds the
+labels, serves label-free `{id, text}` items, scores submitted predictions
+and enforces a configurable submission budget. The config chooses which
+datasets and which metrics are exposed:
+
+```bash
+pip install "commonlid[server]"
+commonlid serve --config docs/eval_server.example.toml
+```
+
+```bash
+curl -s localhost:8000/datasets/commonlid/inputs > inputs.json      # agent side
+curl -s -X POST localhost:8000/datasets/commonlid/submissions \
+     -H 'Content-Type: application/json' \
+     -d '{"predictions": [{"id": 0, "pred": "eng"}, ...]}'
+# {"submission_id": 1, "scores": {"macro": {"f1_gold_only": 0.81}}, "submissions_remaining": 9, ...}
+```
+
+See [docs/eval_server.md](docs/eval_server.md) for the config reference, the
+API and leakage caveats. The test sets are public on Hugging Face, so the
+agent's network access must be restricted too.
 
 ## Python API
 

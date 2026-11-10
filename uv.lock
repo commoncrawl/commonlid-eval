@@ -860,6 +860,7 @@ all = [
     { name = "botocore" },
     { name = "cld3-py" },
     { name = "dspy" },
+    { name = "fastapi" },
     { name = "fsspec" },
     { name = "google-cloud-translate" },
     { name = "gradio" },
@@ -870,8 +871,10 @@ all = [
     { name = "protobuf" },
     { name = "py3langid" },
     { name = "sentencepiece" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "torch" },
     { name = "transformers" },
+    { name = "uvicorn" },
 ]
 cld3 = [
     { name = "cld3-py" },
@@ -900,10 +903,15 @@ notebooks = [
 py3langid = [
     { name = "py3langid" },
 ]
+server = [
+    { name = "fastapi" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "uvicorn" },
+]
 
 [package.dev-dependencies]
 dev = [
-    { name = "commonlid", extra = ["cld3", "google-translate", "leaderboard", "llm", "py3langid"] },
+    { name = "commonlid", extra = ["cld3", "google-translate", "leaderboard", "llm", "py3langid", "server"] },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -917,9 +925,10 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'llm'", specifier = ">=1.17" },
     { name = "botocore", marker = "extra == 'llm'", specifier = ">=1.35" },
     { name = "cld3-py", marker = "extra == 'cld3'", specifier = ">=3.1" },
-    { name = "commonlid", extras = ["afrolid", "cld3", "commonlingua", "google-translate", "leaderboard", "llm", "notebooks", "py3langid"], marker = "extra == 'all'" },
+    { name = "commonlid", extras = ["afrolid", "cld3", "commonlingua", "google-translate", "leaderboard", "llm", "notebooks", "py3langid", "server"], marker = "extra == 'all'" },
     { name = "datasets", specifier = ">=3.1.0" },
     { name = "dspy", marker = "extra == 'llm'", specifier = ">=2.5" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "fasttext-predict", specifier = ">=0.9.2" },
     { name = "fsspec", marker = "extra == 'llm'", specifier = ">=2024.6" },
     { name = "google-cloud-translate", marker = "extra == 'google-translate'", specifier = ">=3.16" },
@@ -939,17 +948,19 @@ requires-dist = [
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "sentencepiece", marker = "extra == 'afrolid'", specifier = ">=0.2" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'server'", specifier = ">=2" },
     { name = "torch", marker = "extra == 'afrolid'", specifier = ">=2.4" },
     { name = "torch", marker = "extra == 'commonlingua'", specifier = ">=2.4" },
     { name = "tqdm", specifier = ">=4.67" },
     { name = "transformers", marker = "extra == 'afrolid'", specifier = ">=4.46,<5" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["afrolid", "llm", "cld3", "google-translate", "commonlingua", "py3langid", "leaderboard", "notebooks", "all"]
+provides-extras = ["afrolid", "llm", "cld3", "google-translate", "commonlingua", "py3langid", "server", "leaderboard", "notebooks", "all"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "commonlid", extras = ["llm", "cld3", "google-translate", "leaderboard", "py3langid"] },
+    { name = "commonlid", extras = ["llm", "cld3", "google-translate", "leaderboard", "py3langid", "server"] },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=5" },

@@ -475,6 +475,70 @@ def generate_support_matrix(
         typer.echo(f"  skipped {model_id}: {reason}", err=True)
 
 
+@app.command("serve")
+def serve(
+    config: Annotated[
+        Path,
+        typer.Option(
+            "--config",
+            "-c",
+            exists=True,
+            dir_okay=False,
+            help="TOML file: datasets, returned metrics, submission limits, state_dir.",
+        ),
+    ],
+    host: Annotated[
+        str | None, typer.Option("--host", help="Bind address (overrides the config).")
+    ] = None,
+    port: Annotated[
+        int | None, typer.Option("--port", help="Port to bind (overrides the config).")
+    ] = None,
+) -> None:
+    """Run the scoring server: serve label-free inputs and score submitted predictions.
+
+    Run it in an environment that holds the labels and that the evaluated
+    agent can reach only over HTTP (requires the [server] extra).
+    """
+    from commonlid.server.config import ConfigError, load_config
+
+    try:
+        server_config = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"invalid server config {config}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        import uvicorn
+
+        from commonlid.server.app import create_app
+    except ImportError as exc:
+        typer.echo(
+            "serve requires `commonlid[server]` (fastapi + uvicorn). "
+            f"Install it via `pip install 'commonlid[server]'`. (underlying error: {exc})",
+            err=True,
+        )
+        raise typer.Exit(code=2) from exc
+
+    from commonlid.server.service import ScoringService
+
+    service = ScoringService(server_config)
+    uvicorn.run(
+        create_app(service),
+        host=host or server_config.host,
+        port=port or server_config.port,
+        log_config=None,
+    )
+
+
+@app.command("list-server-metrics")
+def list_server_metrics() -> None:
+    """List the metric names a scoring-server config may expose."""
+    from commonlid.server.config import available_metrics
+
+    for name in available_metrics():
+        typer.echo(name)
+
+
 leaderboard_app = typer.Typer(
     name="leaderboard",
     help="Serve the CommonLID leaderboard or push results to the HF dataset.",
