@@ -24,13 +24,15 @@ src/commonlid/
 │   └── nano.py             # Stratified-sample variants of every full dataset
 ├── evaluation/
 │   ├── evaluator.py        # cartesian product (models x datasets) → files
-│   ├── results.py          # Result dataclass, summary.json, predictions.jsonl
+│   ├── results.py          # Result dataclass, summary.json, predictions.jsonl, text_hash
 │   └── cache.py            # Per-(model, dataset) text-hash-keyed cache (code + score + raw)
 ├── metrics/
 │   ├── core.py             # compute_per_language_metrics, LanguageMetrics
 │   ├── aggregate.py        # macro_average / micro_average (gold-only + observed views)
 │   ├── fpr.py              # false_positive_rate, stats_per_model_supported
 │   └── support_matrix.py   # CSV load/save of language x model support
+├── analysis/
+│   └── breakdown.py        # Cross-model breakdown of published predictions (docs/breakdown.md)
 ├── leaderboard/            # Optional gradio app (extra `commonlid[leaderboard]`)
 │   ├── app.py              # build_app() — tabs per dataset + drilldowns
 │   └── data.py             # LeaderboardRow, load_results() (HF dataset / local dir)
@@ -43,7 +45,7 @@ src/commonlid/
 ├── vendor/
 │   └── fun_langid.py       # Vendored simple char-4gram LID (1.7k lines of tables)
 ├── cli.py                  # Typer app: version, list-models, list-datasets, run,
-│                           # predict, generate-support-matrix, export-csv,
+│                           # predict, generate-support-matrix, export-csv, breakdown,
 │                           # leaderboard {serve,upload}
 ├── logging.py
 └── py.typed
