@@ -21,6 +21,15 @@ shuffle = true
 host = "127.0.0.1"
 port = 8000
 
+# Require `Authorization: Bearer <token>` on every endpoint except /health.
+# Prefer the COMMONLID_SERVER_TOKEN environment variable over a token here.
+# api_token = "change-me"
+
+# per_language.* metrics reveal which languages the gold set contains, so
+# they are refused unless enabled here or with
+# COMMONLID_SERVER_PER_LANGUAGE_METRICS=1.
+per_language_metrics = false
+
 [[datasets]]
 id = "commonlid"
 metrics = ["macro.f1_gold_only"]
@@ -29,5 +38,6 @@ max_submissions = 3          # optional cap for this dataset on top of the globa
 [[datasets]]
 id = "flores_dev"
 limit = 2000                 # optional: serve and score only the first N samples
-# Per-language metrics reveal which languages the gold set contains.
-metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]
+metrics = ["macro.f1_gold_only", "micro.f1_gold_only"]
+# With per_language_metrics = true:
+# metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]

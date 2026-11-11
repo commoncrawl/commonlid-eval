@@ -499,7 +499,7 @@ def serve(
     Run it in an environment that holds the labels and that the evaluated
     agent can reach only over HTTP (requires the [server] extra).
     """
-    from commonlid.server.config import ConfigError, load_config
+    from commonlid.server.config import ENV_API_TOKEN, ConfigError, load_config
 
     try:
         server_config = load_config(config)
@@ -519,24 +519,41 @@ def serve(
         )
         raise typer.Exit(code=2) from exc
 
-    from commonlid.server.service import ScoringService
+    from commonlid.server.service import ScoringService, StateMismatchError
 
-    service = ScoringService(server_config)
-    uvicorn.run(
-        create_app(service),
-        host=host or server_config.host,
-        port=port or server_config.port,
-        log_config=None,
-    )
+    bind_host = host if host is not None else server_config.host
+    bind_port = port if port is not None else server_config.port
+    if server_config.api_token is None and bind_host not in {"127.0.0.1", "localhost", "::1"}:
+        logger.warning(
+            "Binding to %s without an api_token: anyone who can reach this address can "
+            "fetch inputs and spend the submission budget. Set api_token or %s.",
+            bind_host,
+            ENV_API_TOKEN,
+        )
+    try:
+        service = ScoringService(server_config)
+    except StateMismatchError as exc:
+        typer.echo(f"cannot start: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    uvicorn.run(create_app(service), host=bind_host, port=bind_port, log_config=None)
 
 
 @app.command("list-server-metrics")
 def list_server_metrics() -> None:
     """List the metric names a scoring-server config may expose."""
-    from commonlid.server.config import available_metrics
+    from commonlid.server.config import (
+        ENV_PER_LANGUAGE_METRICS,
+        PER_LANGUAGE_PREFIX,
+        available_metrics,
+    )
 
     for name in available_metrics():
         typer.echo(name)
+    typer.echo(
+        f"({PER_LANGUAGE_PREFIX}* metrics need `per_language_metrics = true` "
+        f"or {ENV_PER_LANGUAGE_METRICS}=1)",
+        err=True,
+    )
 
 
 leaderboard_app = typer.Typer(

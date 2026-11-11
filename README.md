@@ -219,9 +219,21 @@ curl -s -X POST localhost:8000/datasets/commonlid/submissions \
 # {"submission_id": 1, "scores": {"macro": {"f1_gold_only": 0.81}}, "submissions_remaining": 9, ...}
 ```
 
+Per-language metrics are off by default because they reveal the gold
+language set; `per_language_metrics = true` (or
+`COMMONLID_SERVER_PER_LANGUAGE_METRICS=1`) enables them. Set an API token
+(`COMMONLID_SERVER_TOKEN`) whenever the server listens beyond localhost. The
+repository's `Dockerfile` packages the server as an image:
+
+```bash
+docker build -t commonlid-server .
+docker run -p 8000:8000 -e COMMONLID_SERVER_TOKEN=... \
+  -v "$PWD/server.toml:/config/server.toml:ro" -v commonlid-state:/state commonlid-server
+```
+
 See [docs/eval_server.md](docs/eval_server.md) for the config reference, the
-API and leakage caveats. The test sets are public on Hugging Face, so the
-agent's network access must be restricted too.
+API, running in Docker and leakage caveats. The test sets are public on
+Hugging Face, so the agent's network access must be restricted too.
 
 ## Python API
 

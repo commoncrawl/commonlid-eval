@@ -36,7 +36,7 @@ src/commonlid/
 ├── server/                 # Scoring server (extra `commonlid[server]`), see docs/eval_server.md
 │   ├── config.py           # TOML config: datasets, exposed metrics, submission limits
 │   ├── service.py          # ScoringService: label-free inputs, scoring, budget, state
-│   └── app.py              # FastAPI routes over ScoringService
+│   └── app.py              # FastAPI routes over ScoringService (+ optional bearer token)
 ├── leaderboard/            # Optional gradio app (extra `commonlid[leaderboard]`)
 │   ├── app.py              # build_app() — tabs per dataset + drilldowns
 │   └── data.py             # LeaderboardRow, load_results() (HF dataset / local dir)

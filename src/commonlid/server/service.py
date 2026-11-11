@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING, Any
 
 from commonlid import __version__
 from commonlid.core.lid_model import LIDModel
-from commonlid.evaluation.results import Result, write_predictions, write_summary
+from commonlid.evaluation.results import Result, text_hash, write_predictions, write_summary
 from commonlid.metrics.core import UND_TOKEN, compute_per_language_metrics
-from commonlid.server.config import DatasetConfig, ServerConfig
+from commonlid.server.config import PER_LANGUAGE_PREFIX, DatasetConfig, ServerConfig
 
 if TYPE_CHECKING:
     from commonlid.core.lid_dataset import LIDDataset
@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 
 STATE_FILENAME = "state.json"
 SUBMISSIONS_SUBDIR = "submissions"
-_STATE_VERSION = 1
+_STATE_VERSION = 2
+#: Per-language fields that give away exact gold counts in one submission.
+_COUNT_FIELDS = ("gt_count", "correct", "predictions")
 #: How many offending ids an error message lists before truncating.
 _MAX_IDS_IN_ERROR = 10
 
@@ -59,18 +61,35 @@ class SubmissionLimitError(ScoringError):
     status_code = 429
 
 
+class StateMismatchError(RuntimeError):
+    """The served items no longer match the ids handed out before a restart."""
+
+
 @dataclass(slots=True)
 class _ServedDataset:
-    """A dataset in served order: position ``i`` is the item with id ``i``."""
+    """A dataset in served order: position ``i`` is the item with id ``i``.
+
+    ``order[i]`` is that item's position in the dataset (the ``idx`` of
+    ``commonlid run`` predictions).
+    """
 
     config: DatasetConfig
     revision: str | None
     texts: list[str]
     golds: list[str | None]
+    order: list[int]
 
+    @property
+    def fingerprint(self) -> str:
+        """Hash of the served texts in served order.
 
-def _text_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        It changes whenever an item id would point to a different text: a
+        new shuffle seed, another ``limit`` or changed dataset contents.
+        """
+        digest = hashlib.sha256()
+        for text in self.texts:
+            digest.update(text_hash(text).encode("ascii"))
+        return digest.hexdigest()[:16]
 
 
 def _round(value: Any, digits: int | None) -> Any:
@@ -128,11 +147,14 @@ class ScoringService:
         self.config = config
         self._lock = threading.Lock()
         self._submissions: list[dict[str, Any]] = []
-        seed = self._load_state()
+        state = self._load_state()
         self._datasets: dict[str, _ServedDataset] = {}
         for ds_config in config.datasets:
             dataset = datasets[ds_config.id] if datasets is not None else None
-            self._datasets[ds_config.id] = self._load_dataset(ds_config, dataset, seed)
+            self._datasets[ds_config.id] = self._load_dataset(ds_config, dataset, self._seed)
+        self._check_fingerprints(state.get("datasets", {}))
+        self._warn_per_language()
+        self._save_state()
 
     # ------------------------------------------------------------------ state
 
@@ -142,8 +164,8 @@ class ScoringService:
             return None
         return self.config.state_dir / STATE_FILENAME
 
-    def _load_state(self) -> int:
-        """Restore past submissions and return the shuffle seed to use."""
+    def _load_state(self) -> dict[str, Any]:
+        """Restore past submissions, pick the shuffle seed, return the raw state."""
         path = self._state_path
         state: dict[str, Any] = {}
         if path is not None and path.exists():
@@ -163,8 +185,7 @@ class ScoringService:
         else:
             seed = secrets.randbits(63)
         self._seed = seed
-        self._save_state()
-        return seed
+        return state
 
     def _save_state(self) -> None:
         path = self._state_path
@@ -174,11 +195,65 @@ class ScoringService:
         state = {
             "version": _STATE_VERSION,
             "shuffle_seed": self._seed,
+            "datasets": {
+                ds_id: {
+                    "n_items": len(served.texts),
+                    "revision": served.revision,
+                    "fingerprint": served.fingerprint,
+                }
+                for ds_id, served in self._datasets.items()
+            },
             "submissions": self._submissions,
         }
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(path)
+
+    def _check_fingerprints(self, previous: Mapping[str, Any]) -> None:
+        """Refuse to start if item ids handed out before now point elsewhere.
+
+        Only matters once a dataset has accepted submissions: an agent may
+        still hold the old inputs, and scoring them against the new order
+        would burn its budget on meaningless scores.
+        """
+        for ds_id, served in self._datasets.items():
+            before = previous.get(ds_id, {}).get("fingerprint")
+            if before is None or before == served.fingerprint:
+                continue
+            if self._used(ds_id) == 0:
+                logger.warning(
+                    "Items of %s changed since the last start (shuffle seed, limit or "
+                    "dataset revision); no submissions yet, so the new order is used.",
+                    ds_id,
+                )
+                continue
+            path = self._state_path
+            msg = (
+                f"the items served for {ds_id!r} changed since the last start (shuffle "
+                f"seed, limit or dataset revision), so ids from earlier inputs would "
+                f"point to other texts. {self._used(ds_id)} submission(s) were already "
+                f"accepted. Restore the previous settings, or delete {path} to start over "
+                "(this resets the submission counter)."
+            )
+            raise StateMismatchError(msg)
+
+    def _warn_per_language(self) -> None:
+        for served in self._datasets.values():
+            fields = [
+                m.removeprefix(PER_LANGUAGE_PREFIX)
+                for m in served.config.metrics
+                if m.startswith(PER_LANGUAGE_PREFIX)
+            ]
+            if not fields:
+                continue
+            counts = [f for f in fields if f in _COUNT_FIELDS]
+            logger.warning(
+                "%s returns per-language metrics %s: they reveal which languages the gold "
+                "set contains%s.",
+                served.config.id,
+                fields,
+                f", and {counts} reveal how many samples each has" if counts else "",
+            )
 
     # --------------------------------------------------------------- datasets
 
@@ -202,6 +277,7 @@ class ScoringService:
             revision=dataset.hf_revision,
             texts=[texts[i] for i in order],
             golds=[golds[i] for i in order],
+            order=order,
         )
 
     def _get(self, dataset_id: str) -> _ServedDataset:
@@ -316,7 +392,7 @@ class ScoringService:
             )
             summary = result.summary()
             scores = select_metrics(summary, served.config.metrics, self.config.round_digits)
-            self._archive(submission_id, served, raw_preds, preds, result)
+            self._archive(served, raw_preds, preds, result)
             self._submissions.append({
                 "submission_id": submission_id,
                 "dataset_id": dataset_id,
@@ -383,30 +459,37 @@ class ScoringService:
 
     def _archive(
         self,
-        submission_id: int,
         served: _ServedDataset,
         raw_preds: list[str | None],
         preds: list[str | None],
         result: Result,
     ) -> None:
-        """Keep the full summary and per-item predictions for the operator."""
+        """Keep the full summary and per-item predictions for the operator.
+
+        The layout and rows match ``commonlid run --output-dir``
+        (``<dataset>/<model>/predictions.jsonl``, rows in dataset order keyed
+        by ``idx``), so ``commonlid breakdown --local-dir <state_dir>/submissions``
+        reads them. ``id`` is the item id the agent saw, ``pred_raw`` the code
+        it submitted.
+        """
         if self.config.state_dir is None:
             return
-        run_dir = (
-            self.config.state_dir / SUBMISSIONS_SUBDIR / f"{submission_id:04d}_{served.config.id}"
-        )
+        run_dir = self.config.state_dir / SUBMISSIONS_SUBDIR / served.config.id / result.model_id
+        served_ids = sorted(range(len(served.order)), key=served.order.__getitem__)
         rows = (
             {
+                "idx": served.order[i],
                 "id": i,
-                "text_hash": _text_hash(text),
-                "gold": gold,
-                "pred": pred,
-                "pred_submitted": raw,
-                "correct": bool(gold is not None and gold == (pred or UND_TOKEN)),
+                "text_hash": text_hash(served.texts[i]),
+                "gold": served.golds[i],
+                "pred": preds[i],
+                "pred_raw": raw_preds[i],
+                "score": None,
+                "correct": bool(
+                    served.golds[i] is not None and served.golds[i] == (preds[i] or UND_TOKEN)
+                ),
             }
-            for i, (text, gold, raw, pred) in enumerate(
-                zip(served.texts, served.golds, raw_preds, preds, strict=True)
-            )
+            for i in served_ids
         )
         write_predictions(rows, run_dir / "predictions.jsonl")
         write_summary(result, run_dir / "summary.json")
