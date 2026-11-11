@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,14 +12,18 @@ from typer.testing import CliRunner
 
 from commonlid.analysis import (
     attach_texts,
+    labels_match,
     language_breakdown,
     load_predictions,
+    model_breakdown,
     sample_breakdown,
     select_top_models,
+    to_macrolanguage,
 )
-from commonlid.analysis.breakdown import to_macrolanguage
 from commonlid.cli import app
-from commonlid.evaluation.evaluator import _text_hash
+from commonlid.evaluation.results import text_hash
+from commonlid.metrics.aggregate import macro_average
+from commonlid.metrics.core import compute_per_language_metrics
 
 pd = pytest.importorskip("pandas")
 
@@ -36,6 +41,8 @@ PREDS: dict[str, list[str | None]] = {
     "C": ["eng", "nld", "fra", "lav", None],
 }
 MACRO_F1 = {"A": 0.9, "B": 0.8, "C": 0.7, "D": 0.1}
+# Only A recorded raw outputs.
+RAW: dict[str, list[str | None]] = {"A": ["en", "nl", "it", "lv", None]}
 
 
 def _write_run(root: Path, model_id: str, preds: list[str | None], macro_f1: float) -> None:
@@ -44,13 +51,16 @@ def _write_run(root: Path, model_id: str, preds: list[str | None], macro_f1: flo
     rows = [
         {
             "idx": i,
-            "text_hash": _text_hash(text),
+            "text_hash": text_hash(text),
             "gold": gold,
             "pred": pred,
+            "score": 0.5,
             "correct": gold == pred,
         }
         for i, (text, gold, pred) in enumerate(zip(TEXTS, GOLDS, preds, strict=True))
     ]
+    for row, raw in zip(rows, RAW.get(model_id, []), strict=False):
+        row["pred_raw"] = raw
     (out / "predictions.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
     )
@@ -101,11 +111,22 @@ def test_select_top_models_validates_args() -> None:
 
 def test_load_predictions_local(results_dir: Path) -> None:
     preds = load_predictions(DATASET, ["A", "B", "D"], local_dir=results_dir)
-    assert list(preds.columns) == ["model_id", "idx", "text_hash", "gold", "pred"]
+    assert list(preds.columns) == [
+        "model_id",
+        "idx",
+        "text_hash",
+        "gold",
+        "pred",
+        "pred_raw",
+        "score",
+    ]
     assert list(dict.fromkeys(preds["model_id"])) == ["A", "B"]
     assert len(preds) == 2 * len(TEXTS)
     # JSON null stays None (not NaN) so it maps to und downstream.
     assert preds.loc[(preds["model_id"] == "A") & (preds["idx"] == 4), "pred"].item() is None
+    # pred_raw is kept where recorded and None where the file has no such key.
+    assert preds.loc[(preds["model_id"] == "A") & (preds["idx"] == 1), "pred_raw"].item() == "nl"
+    assert preds.loc[preds["model_id"] == "B", "pred_raw"].isna().all()
 
 
 def test_load_predictions_empty(tmp_path: Path) -> None:
@@ -136,6 +157,7 @@ def test_sample_breakdown(results_dir: Path) -> None:
     s = sample_breakdown(preds).set_index("idx")
 
     assert list(s.columns[-3:]) == ["pred:A", "pred:B", "pred:C"]
+    assert not s["gold_conflict"].any()
     assert s.loc[0, "n_correct"] == 3
     assert s.loc[0, "error_rate"] == 0.0
     assert s.loc[0, "top_wrong_pred"] is None
@@ -156,7 +178,7 @@ def test_sample_breakdown(results_dir: Path) -> None:
     assert s.loc[4, "consensus_pred"] == "und"
     assert s.loc[4, "n_wrong"] == 2
     assert not s.loc[4, "label_suspect"]
-    assert pd.isna(s.loc[4, "pred:A"])
+    assert s.loc[4, "pred:A"] is None
 
     # Sorted by error_rate, highest first.
     ordered = sample_breakdown(preds)
@@ -179,17 +201,131 @@ def test_single_model_is_never_suspect(results_dir: Path) -> None:
     assert not sample_breakdown(preds)["label_suspect"].any()
 
 
-def test_collapse_macrolanguages(results_dir: Path) -> None:
+def test_macro_match(results_dir: Path) -> None:
     preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
     strict = sample_breakdown(preds).set_index("idx")
     assert strict.loc[3, "error_rate"] == 1.0
     assert strict.loc[3, "label_suspect"]
 
-    collapsed = sample_breakdown(preds, collapse_macrolanguages=True).set_index("idx")
-    assert collapsed.loc[3, "error_rate"] == 0.0
-    assert not collapsed.loc[3, "label_suspect"]
-    # The raw gold label is kept in the output.
-    assert collapsed.loc[3, "gold"] == "lvs"
+    lenient = sample_breakdown(preds, macro_match="macro").set_index("idx")
+    assert lenient.loc[3, "error_rate"] == 0.0
+    assert not lenient.loc[3, "label_suspect"]
+    # Correct predictions count as the gold label; the published ones are kept.
+    assert lenient.loc[3, "consensus_pred"] == "lvs"
+    assert lenient.loc[3, "pred:A"] == "lav"
+    assert lenient.loc[3, "gold"] == "lvs"
+
+
+@pytest.mark.parametrize(
+    ("gold", "pred", "exact", "macro", "sibling"),
+    [
+        ("eng", "eng", True, True, True),
+        ("lvs", "lav", False, True, True),
+        ("zho", "cmn", False, True, True),
+        # Two individual languages of the same macrolanguage.
+        ("arz", "arb", False, False, True),
+        ("cmn", "yue", False, False, True),
+        ("ind", "zsm", False, False, True),
+        ("eng", "deu", False, False, False),
+        ("und", "und", True, True, True),
+        ("eng", "und", False, False, False),
+    ],
+)
+def test_labels_match(gold: str, pred: str, exact: bool, macro: bool, sibling: bool) -> None:
+    assert labels_match(gold, pred, "exact") is exact
+    assert labels_match(gold, pred, "macro") is macro
+    assert labels_match(gold, pred, "sibling") is sibling
+    assert labels_match(pred, gold, "macro") is macro
+
+
+def test_macro_match_validates_mode(results_dir: Path) -> None:
+    preds = load_predictions(DATASET, ["A"], local_dir=results_dir)
+    with pytest.raises(ValueError, match="macro_match must be one of"):
+        sample_breakdown(preds, macro_match="loose")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="macro_match must be one of"):
+        labels_match("eng", "deu", "loose")  # type: ignore[arg-type]
+
+
+def _duplicate_text(preds: Any, src: int, dst: int, gold: str) -> Any:
+    """Make sample ``dst`` the same text as ``src`` with gold label ``gold``."""
+    preds = preds.copy()
+    src_hash = preds.loc[preds["idx"] == src, "text_hash"].iloc[0]
+    preds.loc[preds["idx"] == dst, "text_hash"] = src_hash
+    preds.loc[preds["idx"] == dst, "gold"] = gold
+    return preds
+
+
+def test_gold_conflict(results_dir: Path) -> None:
+    preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
+    # Sample 4 becomes a copy of sample 0 ("hello world") labelled sco.
+    s = sample_breakdown(_duplicate_text(preds, 0, 4, "sco")).set_index("idx")
+    assert s.loc[0, "gold_conflict"]
+    assert s.loc[0, "other_golds"] == "sco"
+    assert s.loc[4, "gold_conflict"]
+    assert s.loc[4, "other_golds"] == "eng"
+    assert not s.loc[1, "gold_conflict"]
+    assert s.loc[1, "other_golds"] is None
+
+    lang = language_breakdown(_duplicate_text(preds, 0, 4, "sco")).set_index("language")
+    assert lang.loc["eng", "n_gold_conflict"] == 1
+    assert lang.loc["sco", "n_gold_conflict"] == 1
+
+    # The same label twice is a plain duplicate, not a conflict.
+    same = sample_breakdown(_duplicate_text(preds, 0, 4, "eng"))
+    assert not same["gold_conflict"].any()
+
+    # lvs and its macrolanguage lav only conflict under exact matching.
+    macro_dup = _duplicate_text(preds, 3, 4, "lav")
+    assert sample_breakdown(macro_dup)["gold_conflict"].sum() == 2
+    assert not sample_breakdown(macro_dup, macro_match="macro")["gold_conflict"].any()
+
+
+def test_misaligned_predictions_raise(results_dir: Path) -> None:
+    preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
+    preds.loc[(preds["model_id"] == "B") & (preds["idx"] == 2), "text_hash"] = "0" * 16
+    with pytest.raises(ValueError, match="do not line up"):
+        sample_breakdown(preds)
+
+
+def test_include_raw(results_dir: Path) -> None:
+    preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
+    assert "raw:A" not in sample_breakdown(preds).columns
+    s = sample_breakdown(preds, include_raw=True).set_index("idx")
+    assert list(s.columns[-3:]) == ["raw:A", "raw:B", "raw:C"]
+    assert s.loc[1, "raw:A"] == "nl"
+    assert s.loc[1, "raw:B"] is None
+
+
+def test_partial_models_are_logged(results_dir: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
+    preds = preds[~((preds["model_id"] == "C") & (preds["idx"] == 0))]
+    with caplog.at_level(logging.INFO, logger="commonlid.analysis.breakdown"):
+        s = sample_breakdown(preds).set_index("idx")
+    assert s.loc[0, "n_models"] == 2
+    assert "1 of 5 sample(s) lack a prediction" in caplog.text
+
+
+def test_model_breakdown(results_dir: Path) -> None:
+    preds = load_predictions(DATASET, list(PREDS), local_dir=results_dir)
+    exact = model_breakdown(preds).set_index("model_id")
+    # Exact matching reproduces the official metric code on the raw predictions.
+    a = preds[preds["model_id"] == "A"]
+    expected = macro_average(compute_per_language_metrics(list(a["gold"]), list(a["pred"])))
+    assert exact.loc["A", "macro_f1"] == pytest.approx(expected["f1_gold_only"])
+    assert (exact["macro_f1"] == exact["macro_f1_exact"]).all()
+    assert (exact["macro_f1_gain"] == 0).all()
+    assert (exact["rank"] == exact["rank_exact"]).all()
+    assert exact.loc["A", "n_samples"] == len(TEXTS)
+
+    lenient = model_breakdown(preds, macro_match="macro").set_index("model_id")
+    # Every model predicted lav for the lvs sample, which now counts.
+    assert (lenient["macro_f1_gain"] > 0).all()
+    pd.testing.assert_series_equal(lenient["macro_f1_exact"], exact["macro_f1_exact"])
+    assert lenient.loc["C", "rank"] == 1
+    assert model_breakdown(preds, macro_match="macro")["macro_f1"].is_monotonic_decreasing
+    assert model_breakdown(preds.iloc[0:0]).empty
 
 
 def test_to_macrolanguage() -> None:
@@ -226,9 +362,9 @@ def test_language_breakdown(results_dir: Path) -> None:
     assert ordered["error_rate"].is_monotonic_decreasing
     assert set(language_breakdown(preds, min_samples=2)["language"]) == {"eng"}
 
-    collapsed = language_breakdown(preds, collapse_macrolanguages=True).set_index("language")
-    assert collapsed.loc["lvs", "error_rate"] == 0.0
-    assert collapsed.loc["lvs", "top_confusion"] is None
+    lenient = language_breakdown(preds, macro_match="macro").set_index("language")
+    assert lenient.loc["lvs", "error_rate"] == 0.0
+    assert lenient.loc["lvs", "top_confusion"] is None
 
 
 def test_language_breakdown_reuses_samples(results_dir: Path) -> None:
@@ -322,16 +458,17 @@ def test_cli_sample_level_suspect_out(results_dir: Path, tmp_path: Path) -> None
     assert sorted(df["idx"]) == [1, 3]
     assert df["label_suspect"].all()
 
-    collapsed = _cli(
+    lenient = _cli(
         results_dir,
         "--level",
         "sample",
         "--only-suspect",
-        "--collapse-macrolanguages",
+        "--macro-match",
+        "macro",
         "--out",
         str(out),
     )
-    assert collapsed.exit_code == 0, collapsed.output
+    assert lenient.exit_code == 0, lenient.output
     assert list(pd.read_csv(out)["idx"]) == [1]
 
 
@@ -410,6 +547,62 @@ def test_cli_errors(results_dir: Path) -> None:
     no_preds = _cli(results_dir, "--model", "D")
     assert no_preds.exit_code == 1
     assert "No predictions" in no_preds.output
+
+
+def test_cli_model_level(results_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "models.csv"
+    result = _cli(results_dir, "--level", "model", "--macro-match", "macro", "--out", str(out))
+    assert result.exit_code == 0, result.output
+    assert "3 model row(s)" in result.output
+    df = pd.read_csv(out)
+    assert df["macro_f1"].is_monotonic_decreasing
+    assert {"rank", "rank_exact", "macro_f1_exact", "macro_f1_gain"} <= set(df.columns)
+
+
+def test_cli_only_gold_conflict_and_raw(results_dir: Path, tmp_path: Path) -> None:
+    # Make sample 4 ("???") the same text as sample 0 in every model's file.
+    for model_id in PREDS:
+        path = results_dir / DATASET / model_id / "predictions.jsonl"
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        rows[4]["text_hash"] = rows[0]["text_hash"]
+        rows[4]["gold"] = "sco"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    out = tmp_path / "conflicts.csv"
+    result = _cli(
+        results_dir, "--level", "sample", "--only-gold-conflict", "--with-raw", "--out", str(out)
+    )
+    assert result.exit_code == 0, result.output
+    df = pd.read_csv(out)
+    assert sorted(df["idx"]) == [0, 4]
+    assert "raw:A" in df.columns
+
+
+def test_cli_misaligned_predictions(results_dir: Path) -> None:
+    path = results_dir / DATASET / "B" / "predictions.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    rows[2]["text_hash"] = "0" * 16
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    result = _cli(results_dir)
+    assert result.exit_code == 1
+    assert "do not line up" in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--only-suspect"], "--only-suspect only applies to --level sample"),
+        (["--with-text"], "--with-text only applies to --level sample"),
+        (["--level", "model", "--with-raw"], "--with-raw only applies to --level sample"),
+        (["--level", "sample", "--min-samples", "2"], "--min-samples only applies"),
+        (["--level", "model", "--max-error-rate", "0.5"], "--max-error-rate only applies"),
+    ],
+)
+def test_cli_rejects_options_for_other_levels(
+    results_dir: Path, args: list[str], message: str
+) -> None:
+    result = _cli(results_dir, *args)
+    assert result.exit_code == 2
+    assert message in " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", result.output).split())
 
 
 def test_preview_text() -> None:

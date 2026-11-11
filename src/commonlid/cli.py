@@ -654,11 +654,25 @@ def export_csv(
 class BreakdownLevel(str, Enum):
     sample = "sample"
     language = "language"
+    model = "model"
 
 
 class SortOrder(str, Enum):
     desc = "desc"
     asc = "asc"
+
+
+class MacroMatchOption(str, Enum):
+    exact = "exact"
+    macro = "macro"
+    sibling = "sibling"
+
+
+_DEFAULT_SORT = {
+    BreakdownLevel.sample: "error_rate",
+    BreakdownLevel.language: "error_rate",
+    BreakdownLevel.model: "macro_f1",
+}
 
 
 @app.command("breakdown")
@@ -668,7 +682,9 @@ def breakdown(
     ],
     level: Annotated[
         BreakdownLevel,
-        typer.Option("--level", help="Aggregate per sample or per gold language."),
+        typer.Option(
+            "--level", help="One row per sample, per gold language, or per model (rescored)."
+        ),
     ] = BreakdownLevel.language,
     top_k: Annotated[
         int, typer.Option("--top-k", "-k", help="Use the k best models on this dataset.")
@@ -709,24 +725,29 @@ def breakdown(
     ] = None,
     show: Annotated[int, typer.Option("--show", help="Rows to print to stdout (0 = none).")] = 20,
     sort_by: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--sort-by",
-            help="Column to sort by, e.g. error_rate or agreement (any output column works).",
+            help="Column to sort by (any output column). Default: error_rate, or macro_f1 "
+            "at model level.",
         ),
-    ] = "error_rate",
+    ] = None,
     order: Annotated[
         SortOrder,
         typer.Option("--order", help="desc = highest values first, asc = lowest first."),
     ] = SortOrder.desc,
     min_error_rate: Annotated[
-        float,
-        typer.Option("--min-error-rate", help="Keep only rows with error_rate >= this value."),
-    ] = 0.0,
+        float | None,
+        typer.Option(
+            "--min-error-rate", help="Sample/language level: keep rows with error_rate >= this."
+        ),
+    ] = None,
     max_error_rate: Annotated[
-        float,
-        typer.Option("--max-error-rate", help="Keep only rows with error_rate <= this value."),
-    ] = 1.0,
+        float | None,
+        typer.Option(
+            "--max-error-rate", help="Sample/language level: keep rows with error_rate <= this."
+        ),
+    ] = None,
     only_suspect: Annotated[
         bool,
         typer.Option(
@@ -734,24 +755,33 @@ def breakdown(
             help="Sample level: keep only likely annotation errors (label_suspect).",
         ),
     ] = False,
+    only_gold_conflict: Annotated[
+        bool,
+        typer.Option(
+            "--only-gold-conflict",
+            help="Sample level: keep only texts that occur with conflicting gold labels.",
+        ),
+    ] = False,
     suspect_min_agreement: Annotated[
         float,
         typer.Option(
             "--suspect-min-agreement",
-            help="Share of models that must agree on the same non-gold label to flag a sample.",
+            help="Share of models that must agree on the same wrong label to flag a sample.",
         ),
     ] = 0.8,
     min_samples: Annotated[
-        int,
+        int | None,
         typer.Option("--min-samples", help="Language level: drop languages with fewer samples."),
-    ] = 1,
-    collapse_macrolanguages: Annotated[
-        bool,
+    ] = None,
+    macro_match: Annotated[
+        MacroMatchOption,
         typer.Option(
-            "--collapse-macrolanguages",
-            help="Count an individual language and its macrolanguage (lvs/lav) as a match.",
+            "--macro-match",
+            help="exact = codes must be equal (official metrics); macro = an individual "
+            "language also matches its macrolanguage (lvs/lav); sibling = also two "
+            "individual languages of one macrolanguage (arz/arb).",
         ),
-    ] = False,
+    ] = MacroMatchOption.exact,
     with_text: Annotated[
         bool,
         typer.Option(
@@ -759,14 +789,19 @@ def breakdown(
             help="Sample level: join the text back in from the registered dataset (downloads it).",
         ),
     ] = False,
+    with_raw: Annotated[
+        bool,
+        typer.Option("--with-raw", help="Sample level: add each model's raw output (raw:<model>)."),
+    ] = False,
 ) -> None:
-    """Break down how the top-k models do per sample or per gold language.
+    """Break down how the top-k models do per sample, per gold language or per model.
 
     Uses the per-sample predictions published in the results HF dataset and
-    reports error rates, confusions and model agreement, sorted by
-    ``--sort-by`` (default: highest ``error_rate`` first). Samples where most models agree on
-    a different label than the gold one are flagged as ``label_suspect``
-    (candidate annotation errors).
+    reports error rates, confusions and model agreement. Samples where most
+    models agree on a different label than the gold one are flagged as
+    ``label_suspect``, and texts that occur with conflicting gold labels as
+    ``gold_conflict`` (both candidate annotation errors). ``--level model``
+    rescores the models under ``--macro-match``. See docs/breakdown.md.
     """
     import pandas as pd
 
@@ -774,10 +809,22 @@ def breakdown(
         attach_texts,
         language_breakdown,
         load_predictions,
+        model_breakdown,
         sample_breakdown,
         select_top_models,
     )
     from commonlid.leaderboard.data import load_results
+
+    _check_breakdown_options(
+        level,
+        only_suspect=only_suspect,
+        only_gold_conflict=only_gold_conflict,
+        with_text=with_text,
+        with_raw=with_raw,
+        min_samples=min_samples,
+        min_error_rate=min_error_rate,
+        max_error_rate=max_error_rate,
+    )
 
     if models:
         selected = list(dict.fromkeys(models))
@@ -814,32 +861,47 @@ def breakdown(
     used = list(dict.fromkeys(preds["model_id"]))
     typer.echo(f"Models ({len(used)}): {', '.join(used)}", err=True)
 
-    samples = sample_breakdown(
-        preds,
-        suspect_min_agreement=suspect_min_agreement,
-        collapse_macrolanguages=collapse_macrolanguages,
-    )
-    if level is BreakdownLevel.sample:
-        table = samples
-        if only_suspect:
-            table = table[table["label_suspect"]]
-    else:
-        table = language_breakdown(
-            preds,
-            samples=samples,
-            collapse_macrolanguages=collapse_macrolanguages,
-            min_samples=min_samples,
-        )
-    table = table[table["error_rate"].between(min_error_rate, max_error_rate)]
-    if sort_by not in table.columns:
+    match = macro_match.value
+    try:
+        if level is BreakdownLevel.model:
+            table = model_breakdown(preds, macro_match=match)  # type: ignore[arg-type]
+        else:
+            samples = sample_breakdown(
+                preds,
+                suspect_min_agreement=suspect_min_agreement,
+                macro_match=match,  # type: ignore[arg-type]
+                include_raw=with_raw,
+            )
+            if level is BreakdownLevel.sample:
+                table = samples
+                if only_suspect:
+                    table = table[table["label_suspect"]]
+                if only_gold_conflict:
+                    table = table[table["gold_conflict"]]
+            else:
+                table = language_breakdown(
+                    preds,
+                    samples=samples,
+                    macro_match=match,  # type: ignore[arg-type]
+                    min_samples=1 if min_samples is None else min_samples,
+                )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    if level is not BreakdownLevel.model:
+        low = 0.0 if min_error_rate is None else min_error_rate
+        high = 1.0 if max_error_rate is None else max_error_rate
+        table = table[table["error_rate"].between(low, high)]
+    sort_col = sort_by or _DEFAULT_SORT[level]
+    if sort_col not in table.columns:
         typer.echo(
-            f"unknown --sort-by column {sort_by!r}; available: {list(table.columns)}", err=True
+            f"unknown --sort-by column {sort_col!r}; available: {list(table.columns)}", err=True
         )
         raise typer.Exit(code=2)
     # Stable, so ties keep the default order (error_rate desc, then agreement / size).
-    table = table.sort_values(sort_by, ascending=order is SortOrder.asc, kind="stable")
+    table = table.sort_values(sort_col, ascending=order is SortOrder.asc, kind="stable")
     table = table.reset_index(drop=True)
-    if with_text and level is BreakdownLevel.sample:
+    if with_text:
         try:
             table = attach_texts(table, dataset)
         except Exception as exc:
@@ -849,12 +911,60 @@ def breakdown(
     if show > 0 and not table.empty:
         with pd.option_context("display.max_columns", None, "display.width", 200):
             preview = table.head(show)
+            formatters: dict[str, Any] = {}
             if "text" in preview.columns:
-                preview = preview.assign(text=preview["text"].map(_preview_text))
-            typer.echo(preview.to_string(index=False, float_format="{:.3f}".format))
+                texts = preview["text"].map(_preview_text)
+                width = max(texts.map(len).max(), len("text"))
+                # Left-align: pandas right-aligns string columns by default.
+                preview = preview.assign(text=texts)
+                formatters["text"] = lambda s, w=width: f"{s:<{w}}"
+            typer.echo(
+                preview.to_string(index=False, float_format="{:.3f}".format, formatters=formatters)
+            )
     if out is not None:
         _write_table(table, out)
         typer.echo(f"Wrote {len(table)} row(s) to {out}", err=True)
+
+
+def _check_breakdown_options(
+    level: BreakdownLevel,
+    *,
+    only_suspect: bool,
+    only_gold_conflict: bool,
+    with_text: bool,
+    with_raw: bool,
+    min_samples: int | None,
+    min_error_rate: float | None,
+    max_error_rate: float | None,
+) -> None:
+    """Reject options that have no effect at ``level`` instead of ignoring them."""
+    per_level = {
+        BreakdownLevel.sample: {
+            "--only-suspect": only_suspect,
+            "--only-gold-conflict": only_gold_conflict,
+            "--with-text": with_text,
+            "--with-raw": with_raw,
+        },
+        BreakdownLevel.language: {"--min-samples": min_samples is not None},
+    }
+    error_rate_levels = {BreakdownLevel.sample, BreakdownLevel.language}
+    for option_level, options in per_level.items():
+        if level is option_level:
+            continue
+        for name, given in options.items():
+            if given:
+                raise typer.BadParameter(
+                    f"{name} only applies to --level {option_level.value}", param_hint="--level"
+                )
+    if level not in error_rate_levels:
+        for name, value in (
+            ("--min-error-rate", min_error_rate),
+            ("--max-error-rate", max_error_rate),
+        ):
+            if value is not None:
+                raise typer.BadParameter(
+                    f"{name} only applies to --level sample or language", param_hint="--level"
+                )
 
 
 def _preview_text(text: str | None, width: int = 60) -> str:
