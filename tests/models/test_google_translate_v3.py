@@ -164,6 +164,13 @@ def test_confidence_survives_an_unmappable_code() -> None:
     assert model.predict_scored(["gibberish"]) == [LIDPrediction(None, 0.4, raw="zzzz")]
 
 
+def test_und_is_no_prediction() -> None:
+    """Like v2, an `und` detection becomes `None` rather than the code `und`."""
+    client = _FakeClient(responses=[_FakeResponse([_FakeLanguage("und", 0.2)])])
+    model = _loaded_model(client, max_workers=1)
+    assert model.predict_scored(["mmm hmm"]) == [LIDPrediction(None, 0.2, raw="und")]
+
+
 def test_blank_text_never_reaches_the_api() -> None:
     client = _FakeClient(responses=[_FakeResponse([_FakeLanguage("en", 1.0)])])
     model = _loaded_model(client, max_workers=1)

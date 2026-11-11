@@ -118,3 +118,20 @@ def test_check_fails_when_a_metric_moved(backfill: ModuleType, tmp_path: Path) -
     _write_run(tmp_path / "after", [row], macro=0.9)
     argv = ["check", "--before", str(tmp_path / "before"), "--after", str(tmp_path / "after")]
     assert backfill.main(argv) == 1
+
+
+def test_check_fails_when_a_rerun_lost_a_file(backfill: ModuleType, tmp_path: Path) -> None:
+    row = {"idx": 0, "text_hash": "h", "gold": "eng", "pred": "eng", "score": 0.5, "correct": True}
+    _write_run(tmp_path / "before", [row], macro=1.0)
+    (tmp_path / "after").mkdir()
+    argv = ["check", "--before", str(tmp_path / "before"), "--after", str(tmp_path / "after")]
+    assert backfill.main(argv) == 1
+
+
+def test_check_fails_when_a_summary_is_missing(backfill: ModuleType, tmp_path: Path) -> None:
+    row = {"idx": 0, "text_hash": "h", "gold": "eng", "pred": "eng", "score": 0.5, "correct": True}
+    _write_run(tmp_path / "before", [row], macro=1.0)
+    _write_run(tmp_path / "after", [row], macro=1.0)
+    (tmp_path / "after" / "ds" / "model" / "summary.json").unlink()
+    argv = ["check", "--before", str(tmp_path / "before"), "--after", str(tmp_path / "after")]
+    assert backfill.main(argv) == 1

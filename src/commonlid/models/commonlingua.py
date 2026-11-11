@@ -104,10 +104,9 @@ class CommonLinguaModel(LIDModel):
                 top_prob, pred_idx = probs.max(dim=-1)
                 indices = pred_idx.cpu().tolist()
                 scores = top_prob.cpu().tolist()
-            results.extend(
-                LIDPrediction(self._idx2lang[int(i)], float(p), raw=self._idx2lang[int(i)])
-                for i, p in zip(indices, scores, strict=True)
-            )
+            for i, p in zip(indices, scores, strict=True):
+                lang = self._idx2lang[int(i)]
+                results.append(LIDPrediction(lang, float(p), raw=lang))
         return results
 
     def discover_supported_languages(self) -> frozenset[str]:

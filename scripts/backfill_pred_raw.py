@@ -169,7 +169,8 @@ def cmd_llm(args: argparse.Namespace) -> int:
             before = [{k: v for k, v in row.items() if k != "pred_raw"} for row in rows]
             stats = backfill_rows(rows, texts_by_hash, caches[model])
             after = [{k: v for k, v in row.items() if k != "pred_raw"} for row in rows]
-            assert before == after, "backfill must only add pred_raw"
+            if before != after:
+                raise RuntimeError(f"{path}: backfill changed a field other than pred_raw")
             totals.update(stats)
             logger.info(
                 "%s/%s: %d rows %s", dataset_id, model, len(rows), dict(sorted(stats.items()))
@@ -195,26 +196,36 @@ def compare_rows(before: Iterable[dict[str, Any]], after: Iterable[dict[str, Any
     return problems
 
 
+def _compare_summaries(old_dir: Path, new_dir: Path) -> list[str]:
+    from commonlid.evaluation.results import load_summary
+
+    old_path, new_path = old_dir / "summary.json", new_dir / "summary.json"
+    missing = [str(p) for p in (old_path, new_path) if not p.exists()]
+    if missing:
+        return [f"summary missing: {', '.join(missing)}"]
+    old_summary, new_summary = load_summary(old_path), load_summary(new_path)
+    return [
+        f"summary {field} changed"
+        for field in _CHECKED_SUMMARY_FIELDS
+        if old_summary.get(field) != new_summary.get(field)
+    ]
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     n_files = n_bad = n_raw = n_rows = 0
     for old_path in sorted(args.before.glob("*/*/predictions.jsonl")):
         rel = old_path.relative_to(args.before)
         new_path = args.after / rel
-        if not new_path.exists():
-            continue
         n_files += 1
+        if not new_path.exists():
+            n_bad += 1
+            logger.error("%s: missing from %s", rel.parent, args.after)
+            continue
         new_rows = _read_rows(new_path)
         problems = compare_rows(_read_rows(old_path), new_rows)
         n_rows += len(new_rows)
         n_raw += sum("pred_raw" in row for row in new_rows)
-
-        old_summary = json.loads((old_path.parent / "summary.json").read_text(encoding="utf-8"))
-        new_summary = json.loads((new_path.parent / "summary.json").read_text(encoding="utf-8"))
-        problems += [
-            f"summary {field} changed"
-            for field in _CHECKED_SUMMARY_FIELDS
-            if old_summary.get(field) != new_summary.get(field)
-        ]
+        problems += _compare_summaries(old_path.parent, new_path.parent)
         if problems:
             n_bad += 1
             logger.error("%s: %d difference(s)", rel.parent, len(problems))

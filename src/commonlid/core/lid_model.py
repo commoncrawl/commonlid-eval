@@ -82,6 +82,9 @@ class LIDModel(ABC):
     # The price list a model billed per call (a paid API) is charged under.
     # ``None`` for local models, whose cost is compute time.
     rate_card: RateCard | None = None
+    # Whether every prediction is a billed call to an external API. True even
+    # when no ``rate_card`` is known (an LLM LiteLLM has no price for).
+    metered: ClassVar[bool] = False
     requires_preprocessing: ClassVar[bool] = True
     default_batch_size: ClassVar[int] = 64
 
@@ -99,10 +102,11 @@ class LIDModel(ABC):
         Return a raw language code, ``None`` for "undetermined", or a
         :class:`LIDPrediction` when the backend also reports a confidence.
         Returning a bare code is equivalent to a prediction with no score,
-        and the code is kept as the raw output. A backend that rewrites the
-        library's label (strips a script suffix, maps a code, turns "und"
-        into ``None``) should return a :class:`LIDPrediction` with ``raw``
-        set to the label exactly as the library reported it.
+        and the code is kept as the raw output; so is the code of a
+        :class:`LIDPrediction` that leaves ``raw`` unset. A backend that
+        rewrites the library's label (strips a script suffix, maps a code,
+        turns "und" into ``None``) should set ``raw`` to the label exactly as
+        the library reported it.
         """
 
     def predict(self, texts: Sequence[str]) -> list[str | None]:
@@ -131,11 +135,13 @@ class LIDModel(ABC):
     def _as_prediction(cls, raw: str | LIDPrediction | None) -> LIDPrediction:
         """Normalise one ``_predict_batch`` entry into a conformed prediction.
 
-        A bare code (or ``None``) is its own raw output. A
-        :class:`LIDPrediction` keeps whatever raw output the backend set.
+        A bare code (or ``None``) is its own raw output, and so is the code of
+        a :class:`LIDPrediction` whose backend left ``raw`` unset. Otherwise
+        the raw output the backend set is kept.
         """
         if isinstance(raw, LIDPrediction):
-            return LIDPrediction(cls._conform(raw.iso639_3), raw.score, raw.raw)
+            out_raw = raw.raw if raw.has_raw else raw.iso639_3
+            return LIDPrediction(cls._conform(raw.iso639_3), raw.score, out_raw)
         return LIDPrediction(cls._conform(raw), None, raw)
 
     def estimate_usage(self, texts: Sequence[str]) -> Usage | None:

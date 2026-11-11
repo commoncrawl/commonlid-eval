@@ -108,7 +108,7 @@ def test_predict_scored_keeps_a_reported_confidence() -> None:
             return [LIDPrediction("jw", 0.75)] * len(texts)
 
     # The raw code is still conformed; only the score passes through untouched.
-    assert Scored().predict_scored(["anything"]) == [LIDPrediction("jav", 0.75)]
+    assert Scored().predict_scored(["anything"]) == [LIDPrediction("jav", 0.75, raw="jw")]
 
 
 def test_predict_scored_keeps_the_score_when_the_code_does_not_conform() -> None:
@@ -120,7 +120,7 @@ def test_predict_scored_keeps_the_score_when_the_code_does_not_conform() -> None
         def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
             return [LIDPrediction("xxxx", 0.99)] * len(texts)
 
-    assert Unmappable().predict_scored(["anything"]) == [LIDPrediction(None, 0.99)]
+    assert Unmappable().predict_scored(["anything"]) == [LIDPrediction(None, 0.99, raw="xxxx")]
 
 
 def test_predict_drops_the_score() -> None:
@@ -146,8 +146,8 @@ def test_predict_scored_accepts_a_mixed_batch() -> None:
 
     assert Mixed().predict_scored(["a", "b", "c"]) == [
         LIDPrediction("eng", None, raw="en"),
-        # A scored prediction without `raw` leaves the raw output unknown.
-        LIDPrediction("deu", 0.5),
+        # A scored prediction without `raw` keeps its code as the raw output.
+        LIDPrediction("deu", 0.5, raw="de"),
         LIDPrediction(None, None, raw=None),
     ]
 
@@ -164,6 +164,21 @@ def test_predict_scored_keeps_the_raw_output() -> None:
     [pred] = Raw().predict_scored(["anything"])
     assert pred == LIDPrediction("eng", 0.5, raw="__label__en_Latn")
     assert pred.has_raw
+
+
+def test_predict_scored_never_leaves_the_raw_output_unknown() -> None:
+    """A backend that forgets `raw=` still records the code it returned."""
+
+    class Forgetful(LIDModel):
+        model_id = "_forgetful"
+
+        def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+            return [LIDPrediction("en", 0.5), LIDPrediction(None, 0.1)]
+
+    assert Forgetful().predict_scored(["a", "b"]) == [
+        LIDPrediction("eng", 0.5, raw="en"),
+        LIDPrediction(None, 0.1, raw=None),
+    ]
 
 
 def test_raw_output_defaults_to_unknown() -> None:

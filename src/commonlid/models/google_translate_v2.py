@@ -52,6 +52,7 @@ class GoogleTranslateV2Model(LIDModel):
     model_id = "GoogleTranslate-v2"
     # Language detection is billed per character sent, at the same price on
     # both editions; v3's one request per text is not billed separately.
+    metered = True
     rate_card = RateCard(
         rates={CHARACTERS: 20.0 / 1_000_000},
         as_of="2026-10-02",

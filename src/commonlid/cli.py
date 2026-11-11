@@ -115,7 +115,10 @@ def run(
         bool,
         typer.Option(
             "--refresh-raw",
-            help="Re-predict cached entries that have no raw model output recorded.",
+            help=(
+                "Re-predict cached entries that have no raw model output recorded. "
+                "Needs the cache; refused for paid API models."
+            ),
         ),
     ] = False,
     sample_count_threshold: Annotated[
@@ -146,6 +149,8 @@ def run(
     pass ``--model GlotLID`` for a registered model or
     ``--model dspy:azure/gpt-4o-mini`` to spin up a DSPy LLM on the fly.
     """
+    if refresh_raw and no_cache:
+        raise typer.BadParameter("--refresh-raw needs the prediction cache; drop --no-cache.")
     llm_kwargs = {
         "api_base": api_base,
         "api_version": api_version,
@@ -159,6 +164,10 @@ def run(
         "cache_dir": output_dir / ".dspy_cache",
     }
     models = [_resolve_model_spec(spec, llm_kwargs) for spec in model]
+    if refresh_raw and (metered := [m.model_id for m in models if m.metered]):
+        raise typer.BadParameter(
+            "--refresh-raw would send every cached text to a paid API again: " + ", ".join(metered)
+        )
     datasets = [get_dataset(d) for d in dataset]
     Evaluator(
         models=models,

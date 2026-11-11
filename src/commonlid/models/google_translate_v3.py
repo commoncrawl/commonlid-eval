@@ -71,6 +71,7 @@ class GoogleTranslateV3Model(LIDModel):
     model_id = "GoogleTranslate-v3"
     # Language detection is billed per character sent, at the same price on
     # both editions; v3's one request per text is not billed separately.
+    metered = True
     rate_card = RateCard(
         rates={CHARACTERS: 20.0 / 1_000_000},
         as_of="2026-10-02",
@@ -146,7 +147,7 @@ class GoogleTranslateV3Model(LIDModel):
         top = languages[0]
         score = float(top.confidence) if top.confidence is not None else None
         code = top.language_code
-        if not code:
+        if not code or code == "und":
             return LIDPrediction(None, score, raw=code or None)
         # v3 emits BCP-47, so `zh-CN` / `zh-TW` collapse to `zh` before the
         # ISO 639-3 upgrade in `LIDModel._conform`, as in `cld3.py`.

@@ -103,6 +103,7 @@ class DSPyLLMModel(LIDModel):
 
     model_id: str = "dspy_llm"
     requires_preprocessing = False
+    metered = True
 
     def __init__(
         self,

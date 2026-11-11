@@ -62,3 +62,19 @@ def test_run_unknown_model(tmp_path) -> None:
         ],
     )
     assert result.exit_code != 0
+
+
+def test_run_refresh_raw_rejects_no_cache() -> None:
+    result = runner.invoke(
+        app, ["run", "-m", "cld2", "-d", "udhr_nano", "--refresh-raw", "--no-cache"]
+    )
+    assert result.exit_code != 0
+    assert "--refresh-raw needs the prediction cache" in result.output
+
+
+def test_run_refresh_raw_rejects_metered_models() -> None:
+    result = runner.invoke(
+        app, ["run", "-m", "cld2", "-m", "GoogleTranslate-v2", "-d", "udhr_nano", "--refresh-raw"]
+    )
+    assert result.exit_code != 0
+    assert "GoogleTranslate-v2" in result.output

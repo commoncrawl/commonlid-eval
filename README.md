@@ -548,7 +548,7 @@ model actually returned, for analysing what normalisation did:
 | `cld3` | `bg-Latn`, `und` | `bul`, `null` |
 | `py3langid` | `ar`, `und` | `arb`, `null` |
 | `GoogleTranslate-v2`, `GoogleTranslate-v3` | `zh-CN` | `zho` |
-| `dspy:*` LLMs | the answer field as written, e.g. `nah`, `hindi` | `nah`, `null` |
+| `dspy_<name>` LLMs (run as `dspy:<provider/model>`) | the answer field as written, e.g. `eng`, `nah`, `hindi` | `eng`, `null`, `null` |
 
 `pred_raw` has three states, and readers should keep them apart:
 
@@ -559,7 +559,10 @@ model actually returned, for analysing what normalisation did:
   outputs were recorded have no `pred_raw`.
 
 `commonlid run --refresh-raw` re-predicts cached entries that have no raw
-output and logs a warning if any fresh prediction differs from the cached one.
+output. It never changes a cached `pred` or `score`: the raw output is added
+only when the fresh prediction conforms to the cached code, and any that
+differ are left without one and counted in a warning. The flag needs the cache
+and is refused for models billed per call (Google Translate, `dspy:` LLMs).
 The legacy GPT results were backfilled from the original DSPy caches with
 `scripts/backfill_pred_raw.py`; rows whose cache entry could not be matched
 to the stored prediction keep no `pred_raw`.
