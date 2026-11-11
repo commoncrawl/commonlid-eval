@@ -602,7 +602,13 @@ def test_cli_rejects_options_for_other_levels(
 ) -> None:
     result = _cli(results_dir, *args)
     assert result.exit_code == 2
-    assert message in " ".join(re.sub(r"\x1b\[[0-9;]*m|[│╭╮╰╯─]", " ", result.output).split())
+    assert message in _plain(result.output)
+
+
+def _plain(output: str) -> str:
+    """Rich's error panel as one line: no colours, borders or wrapping."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    return " ".join(re.sub(r"[│╭╮╰╯─]", " ", text).split())
 
 
 def test_preview_text() -> None:
