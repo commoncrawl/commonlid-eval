@@ -73,7 +73,7 @@ def test_predict_maps_und_to_none() -> None:
     model._detector = _FakeDetector()
     assert model.predict(["whatever"]) == [None]
     # The probability is kept even though the code is unusable.
-    assert model.predict_scored(["whatever"]) == [LIDPrediction(None, 1.0)]
+    assert model.predict_scored(["whatever"]) == [LIDPrediction(None, 1.0, raw="und")]
 
 
 def test_discover_supported_languages_includes_majors() -> None:

@@ -34,6 +34,7 @@ class EvaluatorConfig:
     use_cache: bool = True
     limit: int | None = None
     sample_count_threshold: int = 0
+    refresh_raw: bool = False
 
 
 def _text_hash(text: str) -> str:
@@ -60,7 +61,17 @@ class Evaluator:
         use_cache: bool = True,
         limit: int | None = None,
         sample_count_threshold: int = 0,
+        refresh_raw: bool = False,
     ) -> None:
+        if refresh_raw:
+            if not use_cache:
+                raise ValueError("refresh_raw needs the prediction cache (use_cache=True)")
+            metered = sorted(m.model_id for m in models if m.metered)
+            if metered:
+                raise ValueError(
+                    "refresh_raw would send every cached text to a paid API again: "
+                    + ", ".join(metered)
+                )
         self.models = models
         self.datasets = datasets
         self.config = EvaluatorConfig(
@@ -69,6 +80,7 @@ class Evaluator:
             use_cache=use_cache,
             limit=limit,
             sample_count_threshold=sample_count_threshold,
+            refresh_raw=refresh_raw,
         )
 
     def run(self) -> list[Result]:
@@ -139,18 +151,25 @@ class Evaluator:
                 batch_size=self.config.batch_size,
                 limit=self.config.limit,
             ):
-                preds = self._predict_with_cache(model, cache, texts)
+                preds = self._predict_with_cache(
+                    model, cache, texts, refresh_raw=self.config.refresh_raw
+                )
                 for text, gold, prediction in zip(texts, golds, preds, strict=True):
                     pred = prediction.iso639_3
                     pred_for_metrics = UND_TOKEN if pred is None else pred
-                    prediction_rows.append({
+                    row: dict[str, object] = {
                         "idx": idx,
                         "text_hash": _text_hash(text),
                         "gold": gold,
                         "pred": pred,
                         "score": prediction.score,
                         "correct": bool(gold is not None and gold == pred_for_metrics),
-                    })
+                    }
+                    # Left out when unknown (a cache entry from before raw
+                    # outputs were kept); `null` means the model gave none.
+                    if prediction.has_raw:
+                        row["pred_raw"] = prediction.raw
+                    prediction_rows.append(row)
                     ytrue.append(gold)
                     ypred.append(pred)
                     idx += 1
@@ -226,27 +245,60 @@ class Evaluator:
         model: LIDModel,
         cache: PredictionCache | None,
         texts: list[str],
+        *,
+        refresh_raw: bool = False,
     ) -> list[LIDPrediction]:
+        """Predict ``texts``, reading and filling ``cache`` when there is one.
+
+        With ``refresh_raw``, cached entries whose raw output is unknown are
+        predicted again so the raw output can be recorded. The cached code and
+        score are always kept: a refresh only adds the raw output, and only
+        when the fresh prediction conforms to the cached code. A fresh
+        prediction with a different code means the model is not reproducible
+        (or has changed) for that text, so its raw output is not recorded,
+        the cached entry is left as it is, and the mismatch is logged.
+        """
         if cache is None:
             return model.predict_scored(texts)
 
         preds: list[LIDPrediction] = [LIDPrediction(None, None)] * len(texts)
+        stale: dict[int, LIDPrediction] = {}
         missing_idx: list[int] = []
         missing_texts: list[str] = []
         for i, text in enumerate(texts):
             hit, pred = cache.get(text)
-            if hit:
+            if hit and (pred.has_raw or not refresh_raw):
                 preds[i] = pred
-            else:
-                missing_idx.append(i)
-                missing_texts.append(text)
+                continue
+            if hit:
+                stale[i] = pred
+            missing_idx.append(i)
+            missing_texts.append(text)
 
         if missing_texts:
             fresh = model.predict_scored(missing_texts)
             pairs: list[tuple[str, LIDPrediction]] = []
+            n_changed = 0
             for offset, pred in enumerate(fresh):
                 i = missing_idx[offset]
+                old = stale.get(i)
+                if old is not None:
+                    if old.iso639_3 != pred.iso639_3:
+                        # Keep the cached entry untouched; the fresh raw output
+                        # belongs to a different prediction.
+                        n_changed += 1
+                        preds[i] = old
+                        continue
+                    pred = LIDPrediction(old.iso639_3, old.score, pred.raw)
                 preds[i] = pred
                 pairs.append((missing_texts[offset], pred))
             cache.put_many(pairs)
+            if n_changed:
+                logger.warning(
+                    "%s: %d of %d refreshed prediction(s) differ from the cached ones; "
+                    "kept the cached predictions without a raw output",
+                    model.model_id,
+                    n_changed,
+                    len(stale),
+                )
         return preds

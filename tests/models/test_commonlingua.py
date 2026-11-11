@@ -89,9 +89,9 @@ def test_predict_scored_returns_the_softmax_probability(
     _install_fake_torch(monkeypatch)
     scored = CommonLinguaModel().predict_scored(["Hello", "Bonjour", "Hallo"])
     assert scored == [
-        LIDPrediction("eng", 0.7),
-        LIDPrediction("fra", 0.8),
-        LIDPrediction("deu", 0.6),
+        LIDPrediction("eng", 0.7, raw="eng"),
+        LIDPrediction("fra", 0.8, raw="fra"),
+        LIDPrediction("deu", 0.6, raw="deu"),
     ]
 
 

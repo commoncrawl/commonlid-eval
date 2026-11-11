@@ -40,3 +40,9 @@ def test_predict_scored_returns_the_classifier_score() -> None:
     # Nothing to score: no code and no confidence.
     assert scored[1].iso639_3 is None
     assert scored[1].score is None
+
+
+def test_raw_output_keeps_und() -> None:
+    [pred] = FunLangIDModel().predict_scored(["123!!!"])
+    assert pred.iso639_3 is None
+    assert pred.raw == "und"

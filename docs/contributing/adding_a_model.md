@@ -62,7 +62,27 @@ pass a real confidence: a constant, or a number on an unbounded scale, is
 worse than `None` because it reads like one. See the table in the README for
 what each shipped model does.
 
+### Keeping the raw output
+
+A bare code returned from `_predict_batch` is recorded as the raw output
+(`pred_raw`) as it is, and so is the code of a `LIDPrediction` that leaves
+`raw` unset. If the wrapper rewrites the library's label before
+returning it — strips a `__label__` prefix or a script suffix, maps a code,
+turns `"und"` into `None` — return a `LIDPrediction` with `raw` set to the
+label exactly as the library reported it, and `raw=None` when there was no
+output at all:
+
+```python
+        label = result.language                  # e.g. "zh-Hant"
+        code = label.split("-")[0]
+        return LIDPrediction(None if code == "und" else code, score, raw=label)
+```
+
 ### Reporting what a call costs
+
+Set `metered = True` on a model whose every prediction is a billed API call,
+even when its price is unknown. `commonlid run --refresh-raw` refuses such
+models, since it would send every cached text again.
 
 Models billed per call declare their price list and implement two optional
 hooks, so that `commonlid estimate-cost` can budget a run before it starts:

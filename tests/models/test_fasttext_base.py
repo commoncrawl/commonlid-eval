@@ -100,3 +100,13 @@ def test_load_downloads_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls["download"] == 1
     assert calls["load"] == 1
     assert m.predict(["hello"]) == ["eng"]
+
+
+def test_raw_output_is_the_verbatim_label() -> None:
+    m = _StubModel()
+    m._ft = _StubFT([["__label__jw_Latn"], ["__label__eng_Latn"]])
+    m._loaded = True
+    assert [p.raw for p in m.predict_scored(["Hello", "world"])] == [
+        "__label__jw_Latn",
+        "__label__eng_Latn",
+    ]

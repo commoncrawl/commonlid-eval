@@ -18,7 +18,7 @@ from pathlib import Path
 import fasttext
 from huggingface_hub import hf_hub_download
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 
 _FASTTEXT_FILEFORMAT_MAGIC_INT32 = 793712314
 
@@ -88,17 +88,17 @@ class FastTextHubModel(LIDModel):
         self._ft = fasttext.load_model(path)
         super().load()
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
         assert self._ft is not None  # load() has run
         labels = self._predict_labels(list(texts))
-        out: list[str | None] = []
+        out: list[LIDPrediction] = []
         for results in labels:
             label = results[0]
             if not label.startswith("__label__"):
                 msg = f"Unexpected fasttext label format from {self.model_id}: {label!r}"
                 raise ValueError(msg)
             code = label.split("__")[2].split("_")[0]
-            out.append(code)
+            out.append(LIDPrediction(code, None, raw=label))
         return out
 
     def _predict_labels(self, texts: list[str]) -> list[list[str]]:

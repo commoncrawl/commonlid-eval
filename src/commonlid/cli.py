@@ -111,6 +111,16 @@ def run(
     batch_size: Annotated[int, typer.Option("--batch-size")] = 64,
     limit: Annotated[int, typer.Option("--limit", help="Cap samples (0 = no limit).")] = 0,
     no_cache: Annotated[bool, typer.Option("--no-cache", help="Disable prediction cache.")] = False,
+    refresh_raw: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-raw",
+            help=(
+                "Re-predict cached entries that have no raw model output recorded. "
+                "Needs the cache; refused for paid API models."
+            ),
+        ),
+    ] = False,
     sample_count_threshold: Annotated[
         int,
         typer.Option("--sample-threshold", help="Skip langs with fewer gold samples than this."),
@@ -139,6 +149,8 @@ def run(
     pass ``--model GlotLID`` for a registered model or
     ``--model dspy:azure/gpt-4o-mini`` to spin up a DSPy LLM on the fly.
     """
+    if refresh_raw and no_cache:
+        raise typer.BadParameter("--refresh-raw needs the prediction cache; drop --no-cache.")
     llm_kwargs = {
         "api_base": api_base,
         "api_version": api_version,
@@ -152,6 +164,10 @@ def run(
         "cache_dir": output_dir / ".dspy_cache",
     }
     models = [_resolve_model_spec(spec, llm_kwargs) for spec in model]
+    if refresh_raw and (metered := [m.model_id for m in models if m.metered]):
+        raise typer.BadParameter(
+            "--refresh-raw would send every cached text to a paid API again: " + ", ".join(metered)
+        )
     datasets = [get_dataset(d) for d in dataset]
     Evaluator(
         models=models,
@@ -161,6 +177,7 @@ def run(
         use_cache=not no_cache,
         limit=limit if limit > 0 else None,
         sample_count_threshold=sample_count_threshold,
+        refresh_raw=refresh_raw,
     ).run()
 
 
@@ -406,14 +423,11 @@ def predict(
     lid_model = get_model(model)
     preds = lid_model.predict_scored(texts)
     for t, p in zip(texts, preds, strict=True):
-        typer.echo(
-            json.dumps({
-                "text": t,
-                "pred": p.iso639_3,
-                "score": p.score,
-                "model": model,
-            })
-        )
+        row: dict[str, object] = {"text": t, "pred": p.iso639_3, "score": p.score}
+        if p.has_raw:
+            row["pred_raw"] = p.raw
+        row["model"] = model
+        typer.echo(json.dumps(row))
 
 
 @app.command("generate-support-matrix")

@@ -52,6 +52,7 @@ class GoogleTranslateV2Model(LIDModel):
     model_id = "GoogleTranslate-v2"
     # Language detection is billed per character sent, at the same price on
     # both editions; v3's one request per text is not billed separately.
+    metered = True
     rate_card = RateCard(
         rates={CHARACTERS: 20.0 / 1_000_000},
         as_of="2026-10-02",
@@ -110,7 +111,7 @@ class GoogleTranslateV2Model(LIDModel):
         super().load()
 
     def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
-        out: list[LIDPrediction] = [LIDPrediction(None, None)] * len(texts)
+        out: list[LIDPrediction] = [LIDPrediction(None, None, raw=None)] * len(texts)
         # Blank input never reaches the API: it would be rejected, and a failed
         # request still counts against the per-character bill.
         billable = [(i, t.strip()) for i, t in enumerate(texts) if t.strip()]
@@ -153,7 +154,7 @@ class GoogleTranslateV2Model(LIDModel):
         out: list[LIDPrediction] = []
         for detection in detections:
             if not isinstance(detection, dict):
-                out.append(LIDPrediction(None, None))
+                out.append(LIDPrediction(None, None, raw=None))
                 continue
             code = detection.get("language")
             # `confidence` is documented as optional and is absent on some
@@ -161,11 +162,11 @@ class GoogleTranslateV2Model(LIDModel):
             score = detection.get("confidence")
             score = float(score) if score is not None else None
             if not code or code == "und":
-                out.append(LIDPrediction(None, score))
+                out.append(LIDPrediction(None, score, raw=code or None))
                 continue
             # v2 emits BCP-47, so `zh-CN` / `zh-TW` collapse to `zh` before the
             # ISO 639-3 upgrade in `LIDModel._conform`, as in `cld3.py`.
-            out.append(LIDPrediction(code.split("-")[0], score))
+            out.append(LIDPrediction(code.split("-")[0], score, raw=code))
         return out
 
     def _call_with_retry(self, values: list[str]) -> list[Any]:

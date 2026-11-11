@@ -52,7 +52,7 @@ class AfroLIDModel(LIDModel):
             label = entry["label"]
             # `score` is the text-classification pipeline's softmax probability.
             score = float(entry["score"])
-            out.append(LIDPrediction(None if label == "nan_lang" else label, score))
+            out.append(LIDPrediction(None if label == "nan_lang" else label, score, raw=label))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:

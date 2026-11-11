@@ -113,11 +113,11 @@ def test_confidence_is_preserved() -> None:
     model = _loaded_model(client)
 
     assert model.predict_scored(["english", "chinese", "german"]) == [
-        LIDPrediction("eng", 0.98),
-        # An integer confidence is normalised to float.
-        LIDPrediction("zho", 1.0),
+        LIDPrediction("eng", 0.98, raw="en"),
+        # An integer confidence is normalised to float; the raw code keeps the region.
+        LIDPrediction("zho", 1.0, raw="zh-CN"),
         # `confidence` is documented as optional; its absence is not an error.
-        LIDPrediction("deu", None),
+        LIDPrediction("deu", None, raw="de"),
     ]
 
 
@@ -125,7 +125,7 @@ def test_confidence_survives_an_unmappable_code() -> None:
     client = _FakeClient(responses=[[{"language": "und", "confidence": 0.4}]])
     model = _loaded_model(client)
 
-    assert model.predict_scored(["gibberish"]) == [LIDPrediction(None, 0.4)]
+    assert model.predict_scored(["gibberish"]) == [LIDPrediction(None, 0.4, raw="und")]
 
 
 def test_blank_text_never_reaches_the_api() -> None:

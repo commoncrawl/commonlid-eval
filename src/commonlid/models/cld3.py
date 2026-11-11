@@ -169,7 +169,7 @@ class CLD3Model(LIDModel):
             code = result.language.split("-")[0]
             # CLD3's `probability` is the neural net's softmax over languages.
             score = float(result.probability)
-            out.append(LIDPrediction(None if code == "und" else code, score))
+            out.append(LIDPrediction(None if code == "und" else code, score, raw=result.language))
         return out
 
     def discover_supported_languages(self) -> frozenset[str]:

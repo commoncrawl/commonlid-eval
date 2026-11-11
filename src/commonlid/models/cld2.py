@@ -15,27 +15,28 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from commonlid.core.lid_model import LIDModel
+from commonlid.core.lid_model import LIDModel, LIDPrediction
 from commonlid.core.registry import register_model
 
 _UNKNOWN_CODES = frozenset({"un", "xx", "zzp"})
 
 
-def _detect_one(text: str) -> str | None:
+def _detect_one(text: str) -> LIDPrediction:
     import pycld2 as cld2
 
     _, _, details = cld2.detect(text, isPlainText=True)
-    raw_code: str = details[0][1].split("-")[0]
+    label: str = details[0][1]
+    raw_code = label.split("-")[0]
     if raw_code in _UNKNOWN_CODES:
-        return None
-    return raw_code
+        return LIDPrediction(None, None, raw=label)
+    return LIDPrediction(raw_code, None, raw=label)
 
 
 @register_model
 class CLD2Model(LIDModel):
     model_id = "cld2"
 
-    def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
+    def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
         return [_detect_one(t) for t in texts]
 
     def discover_supported_languages(self) -> frozenset[str]:

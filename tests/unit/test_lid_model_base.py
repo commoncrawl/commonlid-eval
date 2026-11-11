@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from commonlid.core.lid_model import LIDModel, LIDPrediction
+from commonlid.core.lid_model import RAW_UNSET, LIDModel, LIDPrediction
 
 
 class _Echo(LIDModel):
@@ -96,7 +96,8 @@ def test_predict_scored_defaults_to_a_none_score() -> None:
         def _predict_batch(self, texts: Sequence[str]) -> list[str | None]:
             return ["en"] * len(texts)
 
-    assert Bare().predict_scored(["anything"]) == [LIDPrediction("eng", None)]
+    # A bare code is also the raw output.
+    assert Bare().predict_scored(["anything"]) == [LIDPrediction("eng", None, raw="en")]
 
 
 def test_predict_scored_keeps_a_reported_confidence() -> None:
@@ -107,7 +108,7 @@ def test_predict_scored_keeps_a_reported_confidence() -> None:
             return [LIDPrediction("jw", 0.75)] * len(texts)
 
     # The raw code is still conformed; only the score passes through untouched.
-    assert Scored().predict_scored(["anything"]) == [LIDPrediction("jav", 0.75)]
+    assert Scored().predict_scored(["anything"]) == [LIDPrediction("jav", 0.75, raw="jw")]
 
 
 def test_predict_scored_keeps_the_score_when_the_code_does_not_conform() -> None:
@@ -119,7 +120,7 @@ def test_predict_scored_keeps_the_score_when_the_code_does_not_conform() -> None
         def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
             return [LIDPrediction("xxxx", 0.99)] * len(texts)
 
-    assert Unmappable().predict_scored(["anything"]) == [LIDPrediction(None, 0.99)]
+    assert Unmappable().predict_scored(["anything"]) == [LIDPrediction(None, 0.99, raw="xxxx")]
 
 
 def test_predict_drops_the_score() -> None:
@@ -144,10 +145,47 @@ def test_predict_scored_accepts_a_mixed_batch() -> None:
             return ["en", LIDPrediction("de", 0.5), None]
 
     assert Mixed().predict_scored(["a", "b", "c"]) == [
-        LIDPrediction("eng", None),
-        LIDPrediction("deu", 0.5),
-        LIDPrediction(None, None),
+        LIDPrediction("eng", None, raw="en"),
+        # A scored prediction without `raw` keeps its code as the raw output.
+        LIDPrediction("deu", 0.5, raw="de"),
+        LIDPrediction(None, None, raw=None),
     ]
+
+
+def test_predict_scored_keeps_the_raw_output() -> None:
+    """A backend's raw label survives conformance untouched."""
+
+    class Raw(LIDModel):
+        model_id = "_raw"
+
+        def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+            return [LIDPrediction("en", 0.5, raw="__label__en_Latn")] * len(texts)
+
+    [pred] = Raw().predict_scored(["anything"])
+    assert pred == LIDPrediction("eng", 0.5, raw="__label__en_Latn")
+    assert pred.has_raw
+
+
+def test_predict_scored_never_leaves_the_raw_output_unknown() -> None:
+    """A backend that forgets `raw=` still records the code it returned."""
+
+    class Forgetful(LIDModel):
+        model_id = "_forgetful"
+
+        def _predict_batch(self, texts: Sequence[str]) -> list[LIDPrediction]:
+            return [LIDPrediction("en", 0.5), LIDPrediction(None, 0.1)]
+
+    assert Forgetful().predict_scored(["a", "b"]) == [
+        LIDPrediction("eng", 0.5, raw="en"),
+        LIDPrediction(None, 0.1, raw=None),
+    ]
+
+
+def test_raw_output_defaults_to_unknown() -> None:
+    """Unknown (`RAW_UNSET`) is distinct from "no output" (`None`)."""
+    assert LIDPrediction("eng", 0.9).raw is RAW_UNSET
+    assert not LIDPrediction("eng", 0.9).has_raw
+    assert LIDPrediction(None, None, raw=None).has_raw
 
 
 def test_lid_prediction_is_frozen() -> None:

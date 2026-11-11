@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from commonlid.core.lid_model import LIDPrediction
+from commonlid.core.lid_model import RAW_UNSET, LIDPrediction
 from commonlid.evaluation.cache import PredictionCache
 
 
@@ -62,3 +62,38 @@ def test_model_id_scopes_the_cache(tmp_path) -> None:
 def test_path_property(tmp_path) -> None:
     cache = PredictionCache(tmp_path, "m", "d", "r")
     assert cache.path == tmp_path / "d" / "m.jsonl"
+
+
+def test_raw_output_round_trips(tmp_path) -> None:
+    c1 = PredictionCache(tmp_path, "m", "d", "r")
+    c1.put_many([
+        ("t1", LIDPrediction("eng", 0.5, raw="__label__eng_Latn")),
+        # The model produced no output: `null`, which is not the same as unknown.
+        ("t2", LIDPrediction(None, None, raw=None)),
+    ])
+    c2 = PredictionCache(tmp_path, "m", "d", "r")
+    assert c2.get("t1") == (True, LIDPrediction("eng", 0.5, raw="__label__eng_Latn"))
+    _, no_output = c2.get("t2")
+    assert no_output.has_raw
+    assert no_output.raw is None
+
+
+def test_unknown_raw_output_is_not_written(tmp_path) -> None:
+    """A missing ``pred_raw`` key means unknown, so it must not be written as ``null``."""
+    cache = PredictionCache(tmp_path, "m", "d", "r")
+    cache.put("t1", LIDPrediction("eng", 0.5))
+    (line,) = cache.path.read_text(encoding="utf-8").splitlines()
+    assert "pred_raw" not in json.loads(line)
+    _, pred = PredictionCache(tmp_path, "m", "d", "r").get("t1")
+    assert pred.raw is RAW_UNSET
+
+
+def test_later_lines_win(tmp_path) -> None:
+    """Refreshing an entry appends a line; the last one is what loads."""
+    c1 = PredictionCache(tmp_path, "m", "d", "r")
+    c1.put("t1", LIDPrediction("eng", 0.5))
+    c1.put("t1", LIDPrediction("eng", 0.5, raw="en"))
+    assert PredictionCache(tmp_path, "m", "d", "r").get("t1") == (
+        True,
+        LIDPrediction("eng", 0.5, raw="en"),
+    )
