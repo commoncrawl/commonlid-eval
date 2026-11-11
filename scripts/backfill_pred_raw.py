@@ -130,12 +130,12 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
 def _texts_by_hash(dataset_id: str) -> dict[str, str]:
     import commonlid.datasets  # noqa: F401  (registers the datasets)
     from commonlid.core.registry import get_dataset
-    from commonlid.evaluation.evaluator import _text_hash
+    from commonlid.evaluation.results import text_hash
 
     dataset = get_dataset(dataset_id)
     dataset.load()
     return {
-        _text_hash(text): text
+        text_hash(text): text
         for texts, _ in dataset.iter_batches(batch_size=10_000)
         for text in texts
     }
