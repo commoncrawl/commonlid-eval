@@ -64,6 +64,15 @@ def _is_hf_access_error(exc: BaseException) -> bool:
         return False
     if isinstance(exc, GatedRepoError | RepositoryNotFoundError):
         return True
+    # `datasets.load_dataset` wraps a gated or private repo it cannot read in
+    # its own error ("doesn't exist on the Hub or cannot be accessed").
+    try:
+        from datasets.exceptions import DatasetNotFoundError
+    except ImportError:
+        pass
+    else:
+        if isinstance(exc, DatasetNotFoundError):
+            return True
     if isinstance(exc, HfHubHTTPError):
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in {401, 403, 404}:

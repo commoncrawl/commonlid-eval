@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import sys
@@ -14,6 +15,11 @@ from commonlid.metrics.aggregate import macro_average, micro_average
 from commonlid.metrics.core import LanguageMetrics
 
 SCHEMA_VERSION = 3
+
+
+def text_hash(text: str) -> str:
+    """Short, stable hash of a sample text, stored as ``text_hash`` in predictions.jsonl."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(slots=True)

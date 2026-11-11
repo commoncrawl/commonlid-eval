@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from collections.abc import Mapping
@@ -15,7 +14,7 @@ from tqdm.auto import tqdm
 
 from commonlid.core.lid_model import LIDPrediction
 from commonlid.evaluation.cache import PredictionCache
-from commonlid.evaluation.results import Result, write_predictions, write_summary
+from commonlid.evaluation.results import Result, text_hash, write_predictions, write_summary
 from commonlid.metrics.core import UND_TOKEN, compute_per_language_metrics
 
 if TYPE_CHECKING:
@@ -35,10 +34,6 @@ class EvaluatorConfig:
     limit: int | None = None
     sample_count_threshold: int = 0
     refresh_raw: bool = False
-
-
-def _text_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def _macro_for_log(per_language: Mapping[str, Any]) -> dict[str, Any]:
@@ -159,7 +154,7 @@ class Evaluator:
                     pred_for_metrics = UND_TOKEN if pred is None else pred
                     row: dict[str, object] = {
                         "idx": idx,
-                        "text_hash": _text_hash(text),
+                        "text_hash": text_hash(text),
                         "gold": gold,
                         "pred": pred,
                         "score": prediction.score,

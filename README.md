@@ -698,6 +698,31 @@ make notebooks      # installs the [notebooks] extra and launches jupyter lab
 See `notebooks/README.md` for what the notebook produces and how to point
 it at your own results directory.
 
+### Breakdown across models: hard languages, model agreement, label errors
+
+`commonlid breakdown` lines up the published per-sample predictions of the
+top-k models on a dataset and reports, per sample, per gold language or per
+model, how often they get it right, what they predict instead and how much
+they agree. It flags candidate annotation errors (`label_suspect`: the models
+agree on another label; `gold_conflict`: the same text occurs with different
+labels) and can rescore the models with macrolanguage matching
+(`--macro-match macro`: `lvs`/`lav` counts as a match).
+
+```bash
+# Languages ranked by how often the 5 best models on CommonLID miss them
+commonlid breakdown --dataset commonlid --top-k 5
+
+# Candidate annotation errors with the text joined back in
+commonlid breakdown --dataset commonlid --level sample --only-suspect \
+  --macro-match macro --with-text --out suspects.csv
+
+# Every model rescored with macrolanguage matching, next to the official score
+commonlid breakdown --dataset commonlid_nano --level model --top-k 100 --macro-match macro
+```
+
+See [docs/breakdown.md](docs/breakdown.md) for the options, the output
+columns, the matching modes and the Python API (`commonlid.analysis`).
+
 ## Hugging Face Space
 
 The leaderboard runs as a public Gradio Space at
