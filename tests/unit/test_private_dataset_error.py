@@ -78,6 +78,18 @@ def test_private_dataset_translates_401(monkeypatch: pytest.MonkeyPatch) -> None
         _PrivateDS().load()
 
 
+def test_private_dataset_translates_datasets_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    # What `datasets.load_dataset` raises for a gated repo the user cannot read.
+    from datasets.exceptions import DatasetNotFoundError
+
+    _patch_load_dataset(
+        monkeypatch,
+        DatasetNotFoundError("Dataset 'fake-org/fake-private' doesn't exist on the Hub"),
+    )
+    with pytest.raises(PrivateDatasetAccessError):
+        _PrivateDS().load()
+
+
 def test_private_dataset_passes_through_unrelated_error(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_load_dataset(monkeypatch, ValueError("totally unrelated"))
     with pytest.raises(ValueError, match="totally unrelated"):
