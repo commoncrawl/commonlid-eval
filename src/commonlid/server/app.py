@@ -5,8 +5,9 @@ Endpoints. When ``api_token`` is configured, every endpoint except
 
 * ``GET  /health`` — liveness probe.
 * ``GET  /status`` — datasets, returned metrics and the submission budget.
-* ``GET  /datasets/{dataset_id}/inputs`` — label-free ``[{id, text}]`` items,
-  paginated with ``offset`` / ``limit``.
+* ``GET  /datasets/{dataset_id}/inputs`` — ``[{id, text}]`` items (plus
+  ``label`` on development datasets), paginated with ``offset`` / ``limit``,
+  and the task instructions.
 * ``POST /datasets/{dataset_id}/submissions`` — score predictions.
 * ``GET  /submissions`` — past submissions and their returned scores.
 
@@ -34,14 +35,20 @@ _bearer = HTTPBearer(auto_error=False)
 class Prediction(BaseModel):
     id: int = Field(description="Item id as returned by the inputs endpoint.")
     pred: str | None = Field(
-        description="Predicted language code (ISO 639-3 preferred; ISO 639-1/2 are "
-        "upgraded). null counts as an 'und' prediction."
+        description="ISO 639-3 code such as 'eng'. ISO 639-1/2 and upper-case codes are "
+        "converted with a warning; names and tags such as 'en-US' are rejected. null "
+        "counts as an 'und' (wrong) prediction."
     )
 
 
 class Submission(BaseModel):
     predictions: list[Prediction] = Field(
         description="One prediction for every item id of the dataset."
+    )
+    final: bool = Field(
+        False,
+        description="Mark this as the submission to evaluate. The dataset accepts no "
+        "further submissions afterwards.",
     )
 
 
@@ -51,9 +58,9 @@ def create_app(service: ScoringService) -> FastAPI:
         title="CommonLID scoring server",
         version=__version__,
         description=(
-            "Fetch label-free inputs, submit language predictions and get scores back. "
-            "Each accepted submission counts against a fixed budget; malformed or "
-            "over-budget submissions are rejected and not counted."
+            "Fetch inputs (with task instructions), submit language predictions and get "
+            "scores back. Each accepted submission counts against a fixed budget; "
+            "malformed or over-budget submissions are rejected and not counted."
         ),
     )
 
@@ -77,7 +84,7 @@ def create_app(service: ScoringService) -> FastAPI:
 
     @app.exception_handler(ScoringError)
     def _scoring_error(_: Request, exc: ScoringError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc), **exc.extra})
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -97,7 +104,11 @@ def create_app(service: ScoringService) -> FastAPI:
 
     @app.post("/datasets/{dataset_id}/submissions", dependencies=authorized)
     def submit(dataset_id: str, submission: Submission) -> dict[str, Any]:
-        return service.submit(dataset_id, ((p.id, p.pred) for p in submission.predictions))
+        return service.submit(
+            dataset_id,
+            ((p.id, p.pred) for p in submission.predictions),
+            final=submission.final,
+        )
 
     @app.get("/submissions", dependencies=authorized)
     def submissions() -> list[dict[str, Any]]:

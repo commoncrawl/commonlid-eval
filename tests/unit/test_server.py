@@ -24,10 +24,13 @@ from commonlid.server.config import (
 )
 from commonlid.server.service import (
     InvalidSubmissionError,
+    LabelOverlapError,
     ScoringService,
     StateMismatchError,
+    SubmissionClosedError,
     SubmissionLimitError,
     UnknownDatasetError,
+    check_prediction,
     select_metrics,
 )
 
@@ -60,6 +63,28 @@ class _FakeDataset(LIDDataset):
 
 class _OtherDataset(_FakeDataset):
     dataset_id = "_other"
+
+
+class _DevDataset(_FakeDataset):
+    """Labelled development data that shares no texts with the others."""
+
+    dataset_id = "_dev"
+    SAMPLES: ClassVar[list[dict[str, str | None]]] = [
+        {"text": "thank you", "iso639_3": "eng"},
+        {"text": "danke", "iso639_3": "deu"},
+        {"text": "merci", "iso639_3": "fra"},
+    ]
+
+
+class _MacroDataset(_FakeDataset):
+    """Individual-language gold labels whose macrolanguage codes models often predict."""
+
+    dataset_id = "_macro"
+    SAMPLES: ClassVar[list[dict[str, str | None]]] = [
+        {"text": "labdien", "iso639_3": "lvs"},
+        {"text": "ni hao", "iso639_3": "cmn"},
+        {"text": "hello there", "iso639_3": "eng"},
+    ]
 
 
 GOLD_BY_TEXT = {s["text"]: s["iso639_3"] for s in _FakeDataset.SAMPLES}
@@ -150,6 +175,9 @@ def test_parse_config_zero_means_unlimited() -> None:
         ({"datasets": [{"id": "x"}], "host": 1}, "host must be"),
         ({"datasets": [{"id": "x"}], "api_token": ""}, "api_token"),
         ({"datasets": [{"id": "x", "metrics": ["per_language.f1"]}]}, "per_language_metrics"),
+        ({"datasets": [{"id": "x", "macro_match": "loose"}]}, "macro_match must be one of"),
+        ({"datasets": [{"id": "x", "expose_labels": "yes"}]}, "expose_labels"),
+        ({"datasets": [{"id": "x", "description": " "}]}, "description"),
     ],
 )
 def test_parse_config_rejects_invalid(raw: dict[str, Any], match: str) -> None:
@@ -340,7 +368,8 @@ def test_history_has_no_operator_fields() -> None:
     service = _service()
     service.submit("_fake", _perfect(service))
     (entry,) = service.history()
-    assert set(entry) == {"submission_id", "dataset_id", "timestamp", "scores"}
+    assert set(entry) == {"submission_id", "dataset_id", "timestamp", "final", "scores"}
+    assert entry["final"] is False
 
 
 def test_dataset_limit_caps_served_items() -> None:
@@ -421,6 +450,204 @@ def test_per_language_metrics_are_logged(caplog: pytest.LogCaptureFixture) -> No
     assert "['gt_count'] reveal how many samples" in caplog.text
 
 
+# ------------------------------------------------------------ code validation
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, (None, False)),
+        ("eng", ("eng", False)),
+        ("und", ("und", False)),
+        ("zho", ("zho", False)),
+        ("en", ("eng", True)),
+        ("ger", ("deu", True)),
+        ("ENG", ("eng", True)),
+        (" eng ", ("eng", True)),
+        ("iw", ("heb", True)),
+    ],
+)
+def test_check_prediction_accepts_codes(raw: str | None, expected: tuple[str, bool]) -> None:
+    assert check_prediction(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw", ["English", "english", "en-US", "eng_Latn", "zh-Hans", "xyz", "mo", "", "e"]
+)
+def test_check_prediction_rejects_non_codes(raw: str) -> None:
+    with pytest.raises(ValueError, match="language code"):
+        check_prediction(raw)
+
+
+def test_invalid_codes_are_rejected_listed_and_not_counted() -> None:
+    service = _service()
+    preds = _perfect(service)
+    preds = [(i, "English" if g == "eng" else g) for i, g in preds]
+    preds[-1] = (preds[-1][0], "en-US")
+    with pytest.raises(InvalidSubmissionError) as excinfo:
+        service.submit("_fake", preds)
+    err = excinfo.value
+    assert "not ISO 639-3 codes" in str(err)
+    listed = {row["pred"]: row for row in err.extra["invalid_predictions"]}
+    assert listed["English"]["count"] >= 1
+    assert listed["English"]["reason"] == "not a language code"
+    assert listed["en-US"]["example_ids"] == [preds[-1][0]]
+    assert "id_errors" not in err.extra
+    assert service.status()["submissions_used"] == 0
+
+
+def test_invalid_codes_and_id_errors_are_reported_together() -> None:
+    service = _service()
+    preds = [(i, "xyz") for i, _ in _perfect(service)][1:]
+    with pytest.raises(InvalidSubmissionError) as excinfo:
+        service.submit("_fake", preds)
+    assert "missing ids" in str(excinfo.value)
+    assert excinfo.value.extra["invalid_predictions"][0]["reason"] == (
+        "unknown or retired language code"
+    )
+    assert len(excinfo.value.extra["id_errors"]["missing"]) == 1
+
+
+def test_converted_codes_are_scored_with_a_warning() -> None:
+    service = _service()
+    preds = [(i, {"eng": "en", "deu": "GER"}.get(g or "", g)) for i, g in _perfect(service)]
+    out = service.submit("_fake", preds)
+    assert out["scores"]["macro"]["f1_gold_only"] == 1.0
+    (warning,) = out["warnings"]
+    assert "3 prediction(s) were converted" in warning
+    assert "'en' -> 'eng' (2)" in warning
+    assert "'GER' -> 'deu' (1)" in warning
+    assert service.submit("_fake", _perfect(service))["warnings"] == []
+
+
+# ------------------------------------------------------------------- final
+
+
+def test_final_submission_closes_the_dataset(tmp_path: Path) -> None:
+    cfg = _config(state_dir=str(tmp_path))
+    service = _service(cfg)
+    service.submit("_fake", [(i, "eng") for i, _ in _perfect(service)])
+    out = service.submit("_fake", _perfect(service), final=True)
+    assert out["final"] is True
+    with pytest.raises(SubmissionClosedError, match="submission 2 was marked final"):
+        service.submit("_fake", _perfect(service))
+    # Other datasets stay open, and a rejected submission is not counted.
+    service.submit("_other", _perfect(service, "_other"))
+    assert service.status()["submissions_used"] == 3
+    datasets = {d["id"]: d for d in service.status()["datasets"]}
+    assert datasets["_fake"]["final_submission_id"] == 2
+    assert datasets["_other"]["final_submission_id"] is None
+    assert [e["final"] for e in service.history()] == [False, True, False]
+    assert "Closed: submission 2 was marked final" in service.instructions("_fake")
+
+    restarted = _service(cfg)
+    with pytest.raises(SubmissionClosedError):
+        restarted.submit("_fake", _perfect(restarted))
+
+
+# ------------------------------------------------------------- instructions
+
+
+def test_inputs_carry_instructions() -> None:
+    service = _service()
+    page = service.inputs("_fake", offset=0, limit=2)
+    assert page["labels_exposed"] is False
+    text = page["instructions"]
+    n = len(_FakeDataset.SAMPLES)
+    assert f"each of the {n} texts in dataset '_fake'" in text
+    assert "POST /datasets/_fake/submissions" in text
+    assert f"every id from 0 to {n - 1} exactly once" in text
+    assert "ISO 639-3 code" in text
+    assert '"final": true' in text
+    assert "Codes must match the gold label exactly" in text
+    assert "Returned scores: macro.f1_gold_only, micro.f1_gold_only." in text
+    assert "3 submission(s) left overall" not in text  # no per-dataset cap here
+    assert "unlimited submission(s) left for this dataset, 3 left overall" in text
+    assert "Gold labels are not available" in text
+
+    service.submit("_fake", _perfect(service))
+    assert "2 left overall" in service.inputs("_fake")["instructions"]
+
+
+def test_instructions_show_description_and_matching_mode() -> None:
+    cfg = _config(
+        datasets=[
+            {"id": "_macro", "macro_match": "macro", "description": "Web text from 2024."},
+        ]
+    )
+    service = ScoringService(cfg, datasets={"_macro": _MacroDataset()})
+    text = service.instructions("_macro")
+    assert "Web text from 2024." in text
+    assert "An individual language and its macrolanguage count as the same" in text
+
+
+# ------------------------------------------------------------ macro matching
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("exact", 1 / 3), ("macro", 1.0)])
+def test_macro_match_scoring(tmp_path: Path, mode: str, expected: float) -> None:
+    cfg = _config(
+        datasets=[{"id": "_macro", "macro_match": mode}], state_dir=str(tmp_path), shuffle=False
+    )
+    service = ScoringService(cfg, datasets={"_macro": _MacroDataset()})
+    out = service.submit("_macro", [(0, "lav"), (1, "zho"), (2, "eng")])
+    assert out["scores"]["macro"]["f1_gold_only"] == pytest.approx(expected, abs=1e-4)
+    rows = tmp_path / "submissions" / "_macro" / "submission-0001" / "predictions.jsonl"
+    correct = [json.loads(line)["correct"] for line in rows.read_text().splitlines()]
+    assert correct == ([False, False, True] if mode == "exact" else [True, True, True])
+
+
+# -------------------------------------------------------------- dev datasets
+
+
+def _dev_service(**overrides: Any) -> ScoringService:
+    cfg = _config(
+        datasets=[
+            {"id": "_fake"},
+            {"id": "_dev", "expose_labels": True, "metrics": ["per_language.f1"]},
+        ],
+        max_submissions=1,
+        per_language_metrics=False,
+        **overrides,
+    )
+    return ScoringService(cfg, datasets={"_fake": _FakeDataset(), "_dev": _DevDataset()})
+
+
+def test_dev_dataset_serves_labels() -> None:
+    service = _dev_service()
+    page = service.inputs("_dev")
+    assert page["labels_exposed"] is True
+    gold = {s["text"]: s["iso639_3"] for s in _DevDataset.SAMPLES}
+    assert all(it["label"] == gold[it["text"]] for it in page["items"])
+    assert "development dataset" in page["instructions"]
+    assert "They do not use the overall budget" in page["instructions"]
+    # Evaluation datasets stay label-free.
+    assert all(set(it) == {"id", "text"} for it in service.inputs("_fake")["items"])
+
+
+def test_dev_dataset_skips_global_budget_and_allows_per_language() -> None:
+    service = _dev_service()
+    dev_preds = [(it["id"], it["label"]) for it in service.inputs("_dev")["items"]]
+    for _ in range(3):
+        out = service.submit("_dev", dev_preds)
+    assert out["scores"]["per_language"]["eng"] == {"f1": 1.0}
+    assert out["submissions_remaining"] == 1
+    service.submit("_fake", _perfect(service))
+    with pytest.raises(SubmissionLimitError, match="in total"):
+        service.submit("_fake", _perfect(service))
+    datasets = {d["id"]: d for d in service.status()["datasets"]}
+    assert datasets["_dev"]["uses_global_budget"] is False
+    assert datasets["_dev"]["submissions_used"] == 3
+    # Submission ids stay unique across datasets.
+    assert [e["submission_id"] for e in service.history()] == [1, 2, 3, 4]
+
+
+def test_dev_dataset_sharing_texts_with_an_evaluation_dataset_is_refused() -> None:
+    cfg = _config(datasets=[{"id": "_fake"}, {"id": "_other", "expose_labels": True}])
+    with pytest.raises(LabelOverlapError, match="6 of the 6 texts of '_fake' are in '_other'"):
+        ScoringService(cfg, datasets={"_fake": _FakeDataset(), "_other": _OtherDataset()})
+
+
 # ------------------------------------------------------------------------ HTTP
 
 
@@ -451,6 +678,7 @@ def test_http_errors(client: TestClient) -> None:
     bad = client.post("/datasets/_fake/submissions", json={"predictions": [{"id": 0, "pred": "x"}]})
     assert bad.status_code == 422
     assert "missing ids" in bad.json()["detail"]
+    assert bad.json()["invalid_predictions"][0]["pred"] == "x"
     schema = client.post("/datasets/_fake/submissions", json={"preds": []})
     assert schema.status_code == 422
 
@@ -460,6 +688,21 @@ def test_http_errors(client: TestClient) -> None:
     limited = client.post("/datasets/_other/submissions", json=body)
     assert limited.status_code == 429
     assert "limit" in limited.json()["detail"]
+
+
+def test_http_final_submission(client: TestClient) -> None:
+    items = client.get("/datasets/_fake/inputs").json()
+    assert "ISO 639-3" in items["instructions"]
+    body = {
+        "predictions": [
+            {"id": it["id"], "pred": GOLD_BY_TEXT[it["text"]]} for it in items["items"]
+        ],
+        "final": True,
+    }
+    assert client.post("/datasets/_fake/submissions", json=body).json()["final"] is True
+    closed = client.post("/datasets/_fake/submissions", json=body)
+    assert closed.status_code == 409
+    assert "marked final" in closed.json()["detail"]
 
 
 def test_http_bearer_token() -> None:
@@ -491,6 +734,20 @@ def test_cli_serve_rejects_invalid_config(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli_app, ["serve", "--config", str(path)])
     assert result.exit_code == 2
     assert "unknown metrics" in result.output
+
+
+def test_cli_serve_refuses_label_overlap(tmp_path: Path, fresh_registry: None) -> None:
+    from commonlid.core.registry import register_dataset
+
+    register_dataset(_FakeDataset)
+    register_dataset(_OtherDataset)
+    path = tmp_path / "server.toml"
+    path.write_text(
+        '[[datasets]]\nid = "_fake"\n\n[[datasets]]\nid = "_other"\nexpose_labels = true\n'
+    )
+    result = CliRunner().invoke(cli_app, ["serve", "--config", str(path)])
+    assert result.exit_code == 2
+    assert "would reveal gold labels" in result.output
 
 
 def test_cli_serve_starts_uvicorn(

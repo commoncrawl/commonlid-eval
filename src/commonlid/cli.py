@@ -519,7 +519,7 @@ def serve(
         )
         raise typer.Exit(code=2) from exc
 
-    from commonlid.server.service import ScoringService, StateMismatchError
+    from commonlid.server.service import ScoringService, StartupError
 
     bind_host = host if host is not None else server_config.host
     bind_port = port if port is not None else server_config.port
@@ -532,7 +532,7 @@ def serve(
         )
     try:
         service = ScoringService(server_config)
-    except StateMismatchError as exc:
+    except StartupError as exc:
         typer.echo(f"cannot start: {exc}", err=True)
         raise typer.Exit(code=2) from exc
     uvicorn.run(create_app(service), host=bind_host, port=bind_port, log_config=None)

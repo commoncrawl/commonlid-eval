@@ -30,14 +30,25 @@ port = 8000
 # COMMONLID_SERVER_PER_LANGUAGE_METRICS=1.
 per_language_metrics = false
 
+# Evaluation dataset: texts only. Submissions use the global budget.
 [[datasets]]
 id = "commonlid"
 metrics = ["macro.f1_gold_only"]
 max_submissions = 3          # optional cap for this dataset on top of the global one
+# How predictions match gold labels: "exact" (default, as on the
+# leaderboard), "macro" (an individual language also matches its
+# macrolanguage, e.g. cmn/zho) or "sibling" (an upper bound).
+macro_match = "exact"
+description = "Texts sampled from real-world web data (Common Crawl)."  # shown to the agent
 
+# Development dataset: items include their gold "label", so the agent can
+# check its approach. Its submissions only count against its own cap, and
+# per-language metrics are allowed. The server refuses to start if it shares
+# texts with an evaluation dataset (commonlid_nano is a subset of commonlid,
+# for example, so it cannot be the dev set for commonlid).
 [[datasets]]
 id = "flores_dev"
+expose_labels = true
 limit = 2000                 # optional: serve and score only the first N samples
-metrics = ["macro.f1_gold_only", "micro.f1_gold_only"]
-# With per_language_metrics = true:
-# metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]
+max_submissions = 20
+metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]

@@ -202,9 +202,10 @@ the command, so it only applies to `--hardware` if that is the same hardware.
 
 `commonlid serve` runs a scoring server for evaluating an agent (or any
 external system) without giving it the gold labels. The server holds the
-labels, serves label-free `{id, text}` items, scores submitted predictions
-and enforces a configurable submission budget. The config chooses which
-datasets and which metrics are exposed:
+labels, serves `{id, text}` items with plain-text task instructions, checks
+that predictions are ISO 639-3 codes, scores them and enforces a submission
+budget. The config chooses the datasets, the metrics, exact or macrolanguage
+matching, and which datasets are development sets that serve their labels:
 
 ```bash
 pip install "commonlid[server]"
@@ -212,23 +213,24 @@ commonlid serve --config docs/eval_server.example.toml
 ```
 
 ```bash
-curl -s localhost:8000/datasets/commonlid/inputs > inputs.json      # agent side
+curl -s localhost:8000/datasets/commonlid/inputs > inputs.json   # agent side: items + instructions
 curl -s -X POST localhost:8000/datasets/commonlid/submissions \
      -H 'Content-Type: application/json' \
-     -d '{"predictions": [{"id": 0, "pred": "eng"}, ...]}'
-# {"submission_id": 1, "scores": {"macro": {"f1_gold_only": 0.81}}, "submissions_remaining": 9, ...}
+     -d '{"predictions": [{"id": 0, "pred": "eng"}, ...], "final": true}'
+# {"submission_id": 1, "final": true, "scores": {"macro": {"f1_gold_only": 0.81}}, "warnings": [], ...}
 ```
 
 Per-language metrics are off by default because they reveal the gold
 language set; `per_language_metrics = true` (or
 `COMMONLID_SERVER_PER_LANGUAGE_METRICS=1`) enables them. Set an API token
 (`COMMONLID_SERVER_TOKEN`) whenever the server listens beyond localhost. The
-repository's `Dockerfile` packages the server as an image:
+image is published as `ghcr.io/commoncrawl/commonlid-server`, or build it
+from the repository's `Dockerfile`:
 
 ```bash
-docker build -t commonlid-server .
-docker run -p 8000:8000 -e COMMONLID_SERVER_TOKEN=... \
-  -v "$PWD/server.toml:/config/server.toml:ro" -v commonlid-state:/state commonlid-server
+docker run -p 8000:8000 -e COMMONLID_SERVER_TOKEN=... -e HF_TOKEN \
+  -v "$PWD/server.toml:/config/server.toml:ro" -v commonlid-state:/state \
+  ghcr.io/commoncrawl/commonlid-server:latest
 ```
 
 See [docs/eval_server.md](docs/eval_server.md) for the config reference, the

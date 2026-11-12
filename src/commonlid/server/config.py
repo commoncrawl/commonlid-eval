@@ -29,8 +29,9 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from commonlid.analysis.breakdown import MACRO_MATCH_MODES, MacroMatch
 from commonlid.metrics.aggregate import macro_average, micro_average
 from commonlid.metrics.core import LanguageMetrics
 
@@ -82,6 +83,16 @@ class DatasetConfig:
     max_submissions: int | None = None
     #: Drop languages with fewer gold samples than this from the metrics.
     sample_count_threshold: int = 0
+    #: How a prediction is compared with the gold label: ``exact`` (as on the
+    #: leaderboard), ``macro`` (an individual language also matches its
+    #: macrolanguage) or ``sibling`` (also languages of the same macrolanguage).
+    macro_match: MacroMatch = "exact"
+    #: Development dataset: serve the gold labels with the inputs. Its
+    #: submissions skip the global budget and it may return per-language
+    #: metrics, since its scores reveal nothing new.
+    expose_labels: bool = False
+    #: Free text shown to the agent in the dataset's instructions.
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,13 +184,28 @@ def _parse_dataset(raw: Any, index: int, *, per_language_metrics: bool) -> Datas
             f"choose from: {', '.join(sorted(allowed))}"
         )
         raise ConfigError(msg)
+    expose_labels = _bool(raw.get("expose_labels", False), f"datasets[{index}].expose_labels")
     per_language = [m for m in metrics if m.startswith(PER_LANGUAGE_PREFIX)]
-    if per_language and not per_language_metrics:
+    if per_language and not (per_language_metrics or expose_labels):
         msg = (
             f"datasets[{index}] ({raw['id']}) lists per-language metrics {per_language}, "
             "which reveal the languages of the gold set. Enable them with "
-            f"`per_language_metrics = true` or {ENV_PER_LANGUAGE_METRICS}=1."
+            f"`per_language_metrics = true` or {ENV_PER_LANGUAGE_METRICS}=1 "
+            "(datasets with expose_labels = true may always use them)."
         )
+        raise ConfigError(msg)
+
+    macro_match = raw.get("macro_match", "exact")
+    if macro_match not in MACRO_MATCH_MODES:
+        msg = (
+            f"datasets[{index}].macro_match must be one of {list(MACRO_MATCH_MODES)}, "
+            f"got {macro_match!r}"
+        )
+        raise ConfigError(msg)
+
+    description = raw.get("description")
+    if description is not None and (not isinstance(description, str) or not description.strip()):
+        msg = f"datasets[{index}].description must be a non-empty string"
         raise ConfigError(msg)
 
     threshold = raw.get("sample_count_threshold", 0)
@@ -195,6 +221,9 @@ def _parse_dataset(raw: Any, index: int, *, per_language_metrics: bool) -> Datas
             raw.get("max_submissions"), f"datasets[{index}].max_submissions"
         ),
         sample_count_threshold=threshold,
+        macro_match=cast(MacroMatch, macro_match),
+        expose_labels=expose_labels,
+        description=description.strip() if description else None,
     )
 
 
