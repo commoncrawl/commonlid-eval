@@ -43,6 +43,7 @@ pip install "commonlid[commonlingua]"      # + torch for the CommonLingua byte-l
 pip install "commonlid[google-translate]"  # + the Google Cloud Translation client
 pip install "commonlid[cld3]"              # + cld3-py for the CLD3 model
 pip install "commonlid[leaderboard]"       # + gradio for the leaderboard app
+pip install "commonlid[server]"            # + fastapi/uvicorn for the scoring server
 pip install "commonlid[notebooks]"         # + jupyterlab + matplotlib for paper_tables.ipynb
 pip install "commonlid[all]"               # every optional extra above
 ```
@@ -196,6 +197,45 @@ Prediction caches are ignored too, so the estimate is for a run from scratch.
 
 Hardware throughput from `--calibrate` is measured on the machine running
 the command, so it only applies to `--hardware` if that is the same hardware.
+
+## Scoring an agent without exposing labels
+
+`commonlid serve` runs a scoring server for evaluating an agent (or any
+external system) without giving it the gold labels. The server holds the
+labels, serves `{id, text}` items with plain-text task instructions, checks
+that predictions are ISO 639-3 codes, scores them and enforces a submission
+budget. The config chooses the datasets, the metrics, exact or macrolanguage
+matching, and which datasets are development sets that serve their labels:
+
+```bash
+pip install "commonlid[server]"
+commonlid serve --config docs/eval_server.example.toml
+```
+
+```bash
+curl -s localhost:8000/datasets/commonlid/inputs > inputs.json   # agent side: items + instructions
+curl -s -X POST localhost:8000/datasets/commonlid/submissions \
+     -H 'Content-Type: application/json' \
+     -d '{"predictions": [{"id": 0, "pred": "eng"}, ...], "final": true}'
+# {"submission_id": 1, "final": true, "scores": {"macro": {"f1_gold_only": 0.81}}, "warnings": [], ...}
+```
+
+Per-language metrics are off by default because they reveal the gold
+language set; `per_language_metrics = true` (or
+`COMMONLID_SERVER_PER_LANGUAGE_METRICS=1`) enables them. Set an API token
+(`COMMONLID_SERVER_TOKEN`) whenever the server listens beyond localhost. The
+image is published as `ghcr.io/commoncrawl/commonlid-server`, or build it
+from the repository's `Dockerfile`:
+
+```bash
+docker run -p 8000:8000 -e COMMONLID_SERVER_TOKEN=... -e HF_TOKEN \
+  -v "$PWD/server.toml:/config/server.toml:ro" -v commonlid-state:/state \
+  ghcr.io/commoncrawl/commonlid-server:latest
+```
+
+See [docs/eval_server.md](docs/eval_server.md) for the config reference, the
+API, running in Docker and leakage caveats. The test sets are public on
+Hugging Face, so the agent's network access must be restricted too.
 
 ## Python API
 

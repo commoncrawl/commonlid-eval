@@ -1,0 +1,16 @@
+# Default config baked into the Docker image at /config/server.toml.
+# Mount your own over it: -v ./server.toml:/config/server.toml:ro
+#
+# In the container, keep state_dir on the /state volume. Set the API token
+# with COMMONLID_SERVER_TOKEN rather than in this file, and enable
+# per_language.* metrics with COMMONLID_SERVER_PER_LANGUAGE_METRICS=1.
+# host and port come from the image's command (0.0.0.0:8000).
+# commonlid is gated on Hugging Face: pass an HF_TOKEN with access to it.
+
+max_submissions = 10
+state_dir = "/state"
+round_digits = 4
+
+[[datasets]]
+id = "commonlid"
+metrics = ["macro.f1_gold_only"]

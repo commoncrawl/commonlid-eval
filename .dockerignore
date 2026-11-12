@@ -1,0 +1,10 @@
+# Only what the image build copies.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!src/
+!docker/
+**/__pycache__
+**/*.pyc

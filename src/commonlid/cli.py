@@ -475,6 +475,87 @@ def generate_support_matrix(
         typer.echo(f"  skipped {model_id}: {reason}", err=True)
 
 
+@app.command("serve")
+def serve(
+    config: Annotated[
+        Path,
+        typer.Option(
+            "--config",
+            "-c",
+            exists=True,
+            dir_okay=False,
+            help="TOML file: datasets, returned metrics, submission limits, state_dir.",
+        ),
+    ],
+    host: Annotated[
+        str | None, typer.Option("--host", help="Bind address (overrides the config).")
+    ] = None,
+    port: Annotated[
+        int | None, typer.Option("--port", help="Port to bind (overrides the config).")
+    ] = None,
+) -> None:
+    """Run the scoring server: serve label-free inputs and score submitted predictions.
+
+    Run it in an environment that holds the labels and that the evaluated
+    agent can reach only over HTTP (requires the [server] extra).
+    """
+    from commonlid.server.config import ENV_API_TOKEN, ConfigError, load_config
+
+    try:
+        server_config = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"invalid server config {config}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        import uvicorn
+
+        from commonlid.server.app import create_app
+    except ImportError as exc:
+        typer.echo(
+            "serve requires `commonlid[server]` (fastapi + uvicorn). "
+            f"Install it via `pip install 'commonlid[server]'`. (underlying error: {exc})",
+            err=True,
+        )
+        raise typer.Exit(code=2) from exc
+
+    from commonlid.server.service import ScoringService, StartupError
+
+    bind_host = host if host is not None else server_config.host
+    bind_port = port if port is not None else server_config.port
+    if server_config.api_token is None and bind_host not in {"127.0.0.1", "localhost", "::1"}:
+        logger.warning(
+            "Binding to %s without an api_token: anyone who can reach this address can "
+            "fetch inputs and spend the submission budget. Set api_token or %s.",
+            bind_host,
+            ENV_API_TOKEN,
+        )
+    try:
+        service = ScoringService(server_config)
+    except StartupError as exc:
+        typer.echo(f"cannot start: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    uvicorn.run(create_app(service), host=bind_host, port=bind_port, log_config=None)
+
+
+@app.command("list-server-metrics")
+def list_server_metrics() -> None:
+    """List the metric names a scoring-server config may expose."""
+    from commonlid.server.config import (
+        ENV_PER_LANGUAGE_METRICS,
+        PER_LANGUAGE_PREFIX,
+        available_metrics,
+    )
+
+    for name in available_metrics():
+        typer.echo(name)
+    typer.echo(
+        f"({PER_LANGUAGE_PREFIX}* metrics need `per_language_metrics = true` "
+        f"or {ENV_PER_LANGUAGE_METRICS}=1)",
+        err=True,
+    )
+
+
 leaderboard_app = typer.Typer(
     name="leaderboard",
     help="Serve the CommonLID leaderboard or push results to the HF dataset.",

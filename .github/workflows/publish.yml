@@ -172,3 +172,19 @@ jobs:
             --title "${{ needs.bump-and-build.outputs.tag }}" \
             --generate-notes \
             --verify-tag
+
+  # -------------------------------------------------------------------------
+  # 5. Build, smoke-test and push the scoring-server image for the release
+  #    tag. Skipped on dry runs. Called here because the tag pushed with
+  #    GITHUB_TOKEN above does not trigger other workflows.
+  # -------------------------------------------------------------------------
+  docker-image:
+    needs: [bump-and-build, github-release]
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: ${{ needs.bump-and-build.outputs.tag }}
+      version: ${{ needs.bump-and-build.outputs.version }}
