@@ -1,0 +1,97 @@
+name: Docker image
+
+# Builds the scoring-server image, smoke-tests it and pushes it to
+# ghcr.io/<owner>/commonlid-server:
+#   - push to main         -> :main and :sha-<short sha>
+#   - release (publish.yml) -> :<version> and :latest
+#   - manual run            -> :sha-<short sha> (plus :<version>/:latest if given)
+# Release tags are pushed by publish.yml with GITHUB_TOKEN, which does not
+# trigger `on: push: tags`, so publish.yml calls this workflow instead.
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (default the triggering commit).
+        type: string
+        default: ""
+      version:
+        description: Release version; tags the image as :<version> and :latest.
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version; tags the image as :<version> and :latest. Leave empty for a :sha- tag only.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Image tags
+        id: meta
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/commonlid-server"
+          sha="$(git rev-parse --short=7 HEAD)"
+          tags="$image:sha-$sha"
+          if [ -n "$VERSION" ]; then
+            tags="$tags,$image:${VERSION#v},$image:latest"
+          elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tags="$tags,$image:main"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Tags: $tags"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: commonlid-server:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: docker/smoke_test.sh commonlid-server:test
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=commonlid-server
+            org.opencontainers.image.description=CommonLID scoring server: scores language-ID predictions without exposing the labels
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.revision }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha
