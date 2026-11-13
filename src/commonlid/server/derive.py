@@ -1,7 +1,7 @@
 """Derive a served dataset from a registered one (``source``, ``exclude``, ...).
 
-The steps run in a fixed order: exclude, length filter, stratified sample,
-limit. Each takes and returns positions in the source dataset, so the result
+The steps run in a fixed order: exclude, languages, length filter,
+stratified sample, limit. Each takes and returns positions in the source dataset, so the result
 is a list of source positions; it depends only on the source texts, the
 excluded texts and the config (the sampler is seeded).
 """
@@ -30,6 +30,10 @@ class Derivation:
 
     positions: list[int]
     steps: list[tuple[str, int]] = field(default_factory=list)
+    #: Entries of ``languages`` without a single text (after ``exclude``).
+    missing_languages: list[str] = field(default_factory=list)
+    #: Languages the sample dropped for having fewer than ``min_per_language`` texts.
+    dropped_languages: list[str | None] = field(default_factory=list)
 
     def describe(self) -> str:
         """``"373230 -> exclude: 371708 -> min_chars=20: 351310 -> ..."``."""
@@ -55,6 +59,12 @@ def derive(
         positions = [i for i in positions if normalize_text(texts[i]) not in keys]
         result.steps.append((f"exclude {','.join(config.exclude)}", len(positions)))
 
+    if config.languages:
+        wanted = set(config.languages)
+        positions = [i for i in positions if labels[i] in wanted]
+        result.steps.append((f"languages ({len(wanted)})", len(positions)))
+        result.missing_languages = sorted(wanted - {labels[i] for i in positions})
+
     if config.min_chars is not None or config.max_chars is not None:
         low = config.min_chars or 0
         high = config.max_chars
@@ -70,7 +80,7 @@ def derive(
         result.steps.append((" ".join(bounds), len(positions)))
 
     if config.sample is not None:
-        positions = _stratified(config, positions, labels)
+        positions, result.dropped_languages = _stratified(config, positions, labels)
         s = config.sample
         result.steps.append((
             f"sample max_size={s.max_size} min_per_language={s.min_per_language} seed={s.seed}",
@@ -87,7 +97,7 @@ def derive(
 
 def _stratified(
     config: DatasetConfig, positions: list[int], labels: Sequence[str | None]
-) -> list[int]:
+) -> tuple[list[int], list[str | None]]:
     from collections import Counter
 
     from commonlid.datasets_tools import stratified_sample_with_minimum_per_class
@@ -112,4 +122,4 @@ def _stratified(
         min_size=sample.min_per_language,
         seed=sample.seed,
     )
-    return [positions[j] for j in picked.selected]
+    return [positions[j] for j in picked.selected], picked.dropped_classes

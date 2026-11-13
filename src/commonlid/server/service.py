@@ -456,6 +456,22 @@ class ScoringService:
                 ds_config.source_id,
                 derivation.describe(),
             )
+        if derivation.missing_languages:
+            logger.warning(
+                "%s: no texts in %s for languages %s",
+                ds_config.id,
+                ds_config.source_id,
+                derivation.missing_languages,
+            )
+        if derivation.dropped_languages:
+            assert ds_config.sample is not None
+            logger.warning(
+                "%s: the sample drops %d language(s) with fewer than %d texts left: %s",
+                ds_config.id,
+                len(derivation.dropped_languages),
+                ds_config.sample.min_per_language,
+                derivation.dropped_languages,
+            )
         if not derivation.positions:
             msg = f"dataset {ds_config.id!r} is empty after {derivation.describe()}"
             raise DatasetBuildError(msg)

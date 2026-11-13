@@ -90,7 +90,8 @@ class SampleConfig:
     dropped), and ``max_size`` more texts are spread over the languages in
     proportion to how many each has left. The result has about
     ``max_size + min_per_language * n_languages`` texts and depends only on the
-    input and ``seed``.
+    input and ``seed``. ``max_size = 0`` gives exactly ``min_per_language``
+    texts per language.
     """
 
     max_size: int
@@ -104,7 +105,8 @@ class DatasetConfig:
 
     By default ``id`` names a registered dataset that is served as is. A
     *derived* dataset names a registered ``source`` and changes it, in this
-    order: ``exclude``, ``min_chars`` / ``max_chars``, ``sample``, ``limit``.
+    order: ``exclude``, ``languages``, ``min_chars`` / ``max_chars``,
+    ``sample``, ``limit``.
     The same config always yields the same texts.
     """
 
@@ -115,6 +117,9 @@ class DatasetConfig:
     #: normalisation). A registered dataset is excluded in full; a dataset
     #: defined in this config, as it is served.
     exclude: tuple[str, ...] = ()
+    #: Keep only texts with these gold labels (empty = all), e.g. the hardest
+    #: languages from ``commonlid breakdown --server-languages N``.
+    languages: tuple[str, ...] = ()
     #: Drop texts shorter / longer than this many characters (whitespace runs
     #: count as one character; leading and trailing whitespace is ignored).
     min_chars: int | None = None
@@ -243,13 +248,17 @@ def _parse_sample(raw: Any, name: str) -> SampleConfig | None:
     if missing:
         msg = f"{name} needs {' and '.join(missing)} (the seed makes the sample reproducible)"
         raise ConfigError(msg)
-    return SampleConfig(
-        max_size=_int(raw["max_size"], f"{name}.max_size", minimum=1),
+    sample = SampleConfig(
+        max_size=_int(raw["max_size"], f"{name}.max_size", minimum=0),
         seed=_int(raw["seed"], f"{name}.seed"),
         min_per_language=_int(
             raw.get("min_per_language", 5), f"{name}.min_per_language", minimum=0
         ),
     )
+    if sample.max_size == 0 and sample.min_per_language == 0:
+        msg = f"{name} would be empty: set max_size or min_per_language above 0"
+        raise ConfigError(msg)
+    return sample
 
 
 def _parse_derivation(raw: dict[str, Any], index: int) -> dict[str, Any]:
@@ -270,6 +279,13 @@ def _parse_derivation(raw: dict[str, Any], index: int) -> dict[str, Any]:
         msg = f"{where} ({raw['id']}) cannot exclude itself"
         raise ConfigError(msg)
 
+    languages = raw.get("languages", [])
+    if not isinstance(languages, list) or not all(
+        isinstance(code, str) and code for code in languages
+    ):
+        msg = f"{where}.languages must be a list of language codes"
+        raise ConfigError(msg)
+
     min_chars, max_chars = (
         None if raw.get(key) is None else _int(raw[key], f"{where}.{key}", minimum=0)
         for key in ("min_chars", "max_chars")
@@ -281,6 +297,7 @@ def _parse_derivation(raw: dict[str, Any], index: int) -> dict[str, Any]:
     return {
         "source": source,
         "exclude": tuple(dict.fromkeys(exclude)),
+        "languages": tuple(dict.fromkeys(languages)),
         "min_chars": min_chars,
         "max_chars": max_chars,
         "sample": _parse_sample(raw.get("sample"), f"{where}.sample"),

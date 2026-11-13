@@ -184,11 +184,20 @@ def test_parse_config_zero_means_unlimited() -> None:
         ({"datasets": [{"id": "x", "exclude": [1]}]}, "exclude must be a list"),
         ({"datasets": [{"id": "x", "exclude": ["x"]}]}, "cannot exclude itself"),
         ({"datasets": [{"id": "x", "min_chars": -1}]}, "min_chars must be a non-negative"),
+        ({"datasets": [{"id": "x", "languages": "eng"}]}, "languages must be a list"),
         ({"datasets": [{"id": "x", "min_chars": 9, "max_chars": 5}]}, "not be larger"),
         ({"datasets": [{"id": "x", "sample": 100}]}, "sample must be a table"),
         ({"datasets": [{"id": "x", "sample": {"max_size": 10}}]}, "needs seed"),
         ({"datasets": [{"id": "x", "sample": {"seed": 1}}]}, "needs max_size"),
-        ({"datasets": [{"id": "x", "sample": {"max_size": 0, "seed": 1}}]}, "positive"),
+        ({"datasets": [{"id": "x", "sample": {"max_size": -1, "seed": 1}}]}, "non-negative"),
+        (
+            {
+                "datasets": [
+                    {"id": "x", "sample": {"max_size": 0, "min_per_language": 0, "seed": 1}}
+                ]
+            },
+            "would be empty",
+        ),
         ({"datasets": [{"id": "x", "sample": {"max_size": 5, "seed": 1, "n": 2}}]}, "unknown"),
         (
             {"datasets": [{"id": "a", "exclude": ["b"]}, {"id": "b", "exclude": ["a"]}]},
@@ -756,6 +765,23 @@ def test_length_filter() -> None:
     assert _texts(service, "short") == {"ok", "ja", " hello   world ", "hallo\nwelt"}
 
 
+def test_languages_filter(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING", logger="commonlid.server.service"):
+        service = _derived_service([
+            {
+                "id": "hard",
+                "source": "_pool",
+                "languages": ["deu", "fra", "xho"],
+                "min_chars": 3,
+                "expose_labels": True,
+            },
+        ])
+    labels = {it["label"] for it in service.inputs("hard")["items"]}
+    assert labels == {"deu", "fra"}
+    assert service.inputs("hard")["total"] == 41
+    assert "no texts in _pool for languages ['xho']" in caplog.text
+
+
 def test_sample_is_stratified_and_reproducible() -> None:
     dev = {"id": "dev", "source": "_pool", "min_chars": 3, "sample": {"max_size": 15, "seed": 1}}
     first = _derived_service([dev], shuffle_seed=1)
@@ -773,6 +799,32 @@ def test_sample_is_stratified_and_reproducible() -> None:
     assert _texts(other_seed, "dev") != texts
     assert first._datasets["dev"].content_hash == again._datasets["dev"].content_hash
     assert first.inputs("dev")["items"] != again.inputs("dev")["items"]
+
+
+def test_balanced_sample_with_max_size_zero() -> None:
+    dev = {
+        "id": "dev",
+        "source": "_pool",
+        "min_chars": 3,
+        "sample": {"max_size": 0, "min_per_language": 4, "seed": 1},
+        "expose_labels": True,
+    }
+    labels = [it["label"] for it in _derived_service([dev]).inputs("dev")["items"]]
+    assert sorted(labels) == sorted(["deu", "eng", "fra"] * 4)
+
+
+def test_sample_logs_dropped_languages(caplog: pytest.LogCaptureFixture) -> None:
+    dev = {
+        "id": "dev",
+        "source": "_pool",
+        "sample": {"max_size": 0, "min_per_language": 21, "seed": 1},
+        "expose_labels": True,
+    }
+    with caplog.at_level("WARNING", logger="commonlid.server.service"):
+        labels = {it["label"] for it in _derived_service([dev]).inputs("dev")["items"]}
+    # fra has 20 texts; eng and deu have 22 each.
+    assert labels == {"eng", "deu"}
+    assert "drops 1 language(s) with fewer than 21 texts left: ['fra']" in caplog.text
 
 
 def test_disjoint_splits_by_excluding_configured_datasets() -> None:

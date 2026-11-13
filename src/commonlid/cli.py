@@ -874,6 +874,15 @@ def breakdown(
         bool,
         typer.Option("--with-raw", help="Sample level: add each model's raw output (raw:<model>)."),
     ] = False,
+    server_languages: Annotated[
+        int | None,
+        typer.Option(
+            "--server-languages",
+            min=1,
+            help="Language level: print the first N languages (after sorting and filtering) "
+            "as a scoring-server `languages = [...]` line.",
+        ),
+    ] = None,
 ) -> None:
     """Break down how the top-k models do per sample, per gold language or per model.
 
@@ -905,6 +914,7 @@ def breakdown(
         min_samples=min_samples,
         min_error_rate=min_error_rate,
         max_error_rate=max_error_rate,
+        server_languages=server_languages,
     )
 
     if models:
@@ -1005,6 +1015,14 @@ def breakdown(
     if out is not None:
         _write_table(table, out)
         typer.echo(f"Wrote {len(table)} row(s) to {out}", err=True)
+    if server_languages is not None:
+        languages = [str(lang) for lang in table["language"].head(server_languages)]
+        order_desc = f"{sort_col} {order.value}"
+        typer.echo(
+            f"# {len(languages)} languages of {dataset} by {order_desc} "
+            f"(models: {', '.join(used)}; macro_match = {match})"
+        )
+        typer.echo("languages = [" + ", ".join(f'"{lang}"' for lang in languages) + "]")
 
 
 def _check_breakdown_options(
@@ -1017,6 +1035,7 @@ def _check_breakdown_options(
     min_samples: int | None,
     min_error_rate: float | None,
     max_error_rate: float | None,
+    server_languages: int | None = None,
 ) -> None:
     """Reject options that have no effect at ``level`` instead of ignoring them."""
     per_level = {
@@ -1026,7 +1045,10 @@ def _check_breakdown_options(
             "--with-text": with_text,
             "--with-raw": with_raw,
         },
-        BreakdownLevel.language: {"--min-samples": min_samples is not None},
+        BreakdownLevel.language: {
+            "--min-samples": min_samples is not None,
+            "--server-languages": server_languages is not None,
+        },
     }
     error_rate_levels = {BreakdownLevel.sample, BreakdownLevel.language}
     for option_level, options in per_level.items():

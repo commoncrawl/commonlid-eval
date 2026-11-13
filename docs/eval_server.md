@@ -45,6 +45,7 @@ See [`eval_server.example.toml`](eval_server.example.toml).
 | `[[datasets]] id` | required | A registered dataset id (`commonlid list-datasets`), or any name for a dataset with `source`. |
 | `[[datasets]] source` | `id` | Registered dataset to derive this one from ([below](#derived-datasets)). |
 | `[[datasets]] exclude` | none | Datasets whose texts are removed. |
+| `[[datasets]] languages` | all | Keep only texts with these gold labels. |
 | `[[datasets]] min_chars` / `max_chars` | none | Drop shorter / longer texts. |
 | `[[datasets]] sample` | none | Stratified sample: `{ max_size = N, seed = S, min_per_language = 5 }`. |
 | `[[datasets]] metrics` | `["macro.f1_gold_only"]` | Metrics returned for this dataset. |
@@ -116,15 +117,19 @@ order, each on what the previous one left:
    served with in this config; a dataset defined only in this config, as it
    is served. Texts are compared after whitespace and Unicode normalisation,
    so duplicates in the source (CommonLID has about 1,800) are caught as well.
-2. `min_chars` / `max_chars`: drop texts outside the length range, counted
+2. `languages`: keep only texts with these gold labels, for example the
+   hardest languages ([below](#focusing-on-the-hardest-languages)). Listed
+   languages without any text are logged as a warning.
+3. `min_chars` / `max_chars`: drop texts outside the length range, counted
    after collapsing whitespace runs and stripping the ends.
-3. `sample`: the stratified sampler of the nano datasets. Languages with
+4. `sample`: the stratified sampler of the nano datasets. Languages with
    fewer than `min_per_language` texts (default 5) are dropped, every other
    language keeps `min_per_language` texts, and `max_size` more are spread
    over the languages in proportion to what each has left: about
-   `max_size + min_per_language × languages` texts in total. `seed` is
-   required.
-4. `limit`: keep the first N.
+   `max_size + min_per_language × languages` texts in total. `max_size = 0`
+   gives exactly `min_per_language` texts per language. `seed` is required.
+   Dropped languages are logged as a warning.
+5. `limit`: keep the first N.
 
 ```toml
 [[datasets]]              # hidden evaluation set
@@ -161,6 +166,53 @@ per dataset (also kept in `state.json`); equal hashes mean equal items:
 Derived commonlid_dev from commonlid: 373230 -> exclude commonlid_nano: 371708 -> min_chars=20: 351353 -> sample max_size=1000 min_per_language=5 seed=1: 1479
 Serving commonlid_dev: 1479 items, 96 languages, content hash 3373a2d87d89ab15 (labels exposed)
 ```
+
+### Focusing on the hardest languages
+
+[`commonlid breakdown`](breakdown.md) ranks the languages by how the best
+models do on them. `--server-languages N` prints the first N as a
+`languages` line to paste into the config:
+
+```bash
+commonlid breakdown --dataset commonlid --top-k 5 --macro-match macro \
+  --min-samples 20 --sort-by best_recall --order asc --show 0 --server-languages 20
+```
+
+```
+# 20 languages of commonlid by best_recall asc (models: py3langid, GlotLID, commonlingua, cld2, fasttext; macro_match = macro)
+languages = ["lin", "acf", "rcf", "gcf", "ary", "vec", "hbo", "lat", "fro", "arg", "crh", "afr", "zsm", "jav", "yue", "gom", "apd", "fil", "mar", "gla"]
+```
+
+```toml
+[[datasets]]
+id = "commonlid_dev_hard"
+source = "commonlid"
+exclude = ["commonlid_nano"]
+languages = ["lin", "acf", "rcf", "gcf", "ary", "vec", "hbo", "lat", "fro", "arg", "crh", "afr", "zsm", "jav", "yue", "gom", "apd", "fil", "mar", "gla"]
+min_chars = 20
+sample = { max_size = 0, min_per_language = 25, seed = 1 }   # 25 per language
+expose_labels = true
+```
+
+This serves 450 texts in 18 languages: `apd` and `gcf` have fewer than 25
+texts left after excluding nano and short texts, so the sample drops them
+(and the server logs it).
+
+- Sort by `best_recall` rather than `error_rate`. `error_rate` averages over
+  the models, so a language that some models do not support at all (recall
+  0) ranks as hard even when the others get it right.
+- `--macro-match macro` keeps code-convention mismatches (`lvs`/`lav`) out of
+  the ranking.
+- The list goes into the config, not a breakdown query run at start-up, so
+  the dataset does not change when new results are published.
+- The hardest languages also have the most questionable labels: `lin` has 18
+  `label_suspect` and 11 `gold_conflict` samples out of 55. Check
+  `n_label_suspect` / `n_gold_conflict` in the breakdown before keeping a
+  language whose difficulty may come from its labels.
+- The ranking uses the gold labels of all of CommonLID, nano included. That
+  is fine for picking dev data, since the agent never sees the ranking, but
+  avoid ranking on the evaluation dataset itself when the hard-language list
+  is shown to the agent.
 
 The filters apply to evaluation datasets too (`id = "commonlid_nano"` with
 `min_chars = 20` serves nano without its short texts). In the submission
