@@ -357,6 +357,10 @@ def test_language_breakdown(results_dir: Path) -> None:
     assert lang.loc["deu", "top_confusion_share"] == 1.0
 
     assert lang.loc["fra", "top_confusion_share"] == 0.5
+    # The best model's recall: B gets both eng samples, C the fra one, nobody deu.
+    assert lang.loc["eng", "best_recall"] == 1.0
+    assert lang.loc["fra", "best_recall"] == 1.0
+    assert lang.loc["deu", "best_recall"] == 0.0
 
     ordered = language_breakdown(preds)
     assert ordered["error_rate"].is_monotonic_decreasing
@@ -483,6 +487,24 @@ def test_cli_out_formats(results_dir: Path, tmp_path: Path, suffix: str) -> None
     assert {"recall:A", "recall:C"} <= set(df.columns)
 
 
+def test_cli_server_languages(results_dir: Path) -> None:
+    result = _cli(
+        results_dir,
+        "--sort-by",
+        "best_recall",
+        "--order",
+        "asc",
+        "--server-languages",
+        "2",
+        "--show",
+        "0",
+    )
+    assert result.exit_code == 0, result.output
+    # Ties (deu and lvs: no model gets them) keep the default order.
+    assert 'languages = ["deu", "lvs"]' in result.output
+    assert "# 2 languages of toy by best_recall asc (models: A, B, C" in result.output
+
+
 def test_cli_min_error_rate_and_min_samples(results_dir: Path) -> None:
     result = _cli(results_dir, "--min-error-rate", "0.5", "--min-samples", "1")
     assert result.exit_code == 0, result.output
@@ -594,6 +616,7 @@ def test_cli_misaligned_predictions(results_dir: Path) -> None:
         (["--with-text"], "--with-text only applies to --level sample"),
         (["--level", "model", "--with-raw"], "--with-raw only applies to --level sample"),
         (["--level", "sample", "--min-samples", "2"], "--min-samples only applies"),
+        (["--level", "sample", "--server-languages", "2"], "--server-languages only"),
         (["--level", "model", "--max-error-rate", "0.5"], "--max-error-rate only applies"),
     ],
 )

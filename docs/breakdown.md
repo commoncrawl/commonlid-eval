@@ -101,6 +101,7 @@ One row per gold language, sorted by `error_rate`, highest first.
 |---|---|
 | `language`, `n_samples` | gold label and its number of samples |
 | `error_rate` | mean share of the models that are wrong on a sample of this language. When every model has every sample this is `1 - mean recall` |
+| `best_recall` | the highest recall of any model on this language. A model that does not support the language pulls `error_rate` up but not `best_recall`, so sort by it (`--order asc`) to find the languages even the best model gets wrong |
 | `agreement` | mean share of the models that make the most common prediction on a sample, right or wrong. Low values mean the models disagree with each other |
 | `all_wrong_share` / `all_correct_share` | share of the samples that every model gets wrong / right |
 | `n_label_suspect`, `n_gold_conflict` | number of samples with these flags (see below) |
@@ -108,6 +109,9 @@ One row per gold language, sorted by `error_rate`, highest first.
 | `recall:<model>` | each model's recall on this language |
 
 `--min-samples N` drops languages with fewer than `N` samples.
+`--server-languages N` also prints the first `N` languages (after filtering
+and sorting) as a `languages = [...]` line for a
+[derived scoring-server dataset](eval_server.md#focusing-on-the-hardest-languages).
 
 ### `--level sample`
 

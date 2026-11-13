@@ -428,6 +428,10 @@ def language_breakdown(
     - ``n_samples`` -- samples with this gold label
     - ``error_rate`` -- mean per-sample error rate. When every model has a
       prediction for every sample this is ``1 - mean(model recall)``.
+    - ``best_recall`` -- the highest recall of any model on this language.
+      Unlike ``error_rate`` it is not pulled down by models that do not
+      support the language, so low values mark languages that even the best
+      model gets wrong.
     - ``agreement`` -- mean per-sample ``agreement`` (how often the models
       predict the same label as each other)
     - ``all_wrong_share`` / ``all_correct_share`` -- share of samples every
@@ -450,6 +454,7 @@ def language_breakdown(
         "language",
         "n_samples",
         "error_rate",
+        "best_recall",
         "agreement",
         "all_wrong_share",
         "all_correct_share",
@@ -494,6 +499,7 @@ def language_breakdown(
     recall = df.groupby(["gold", "model_id"])["correct"].mean().unstack("model_id")
     for m in models:
         out[f"{_RECALL_PREFIX}{m}"] = recall[m].reindex(out.index)
+    out["best_recall"] = recall.max(axis=1).reindex(out.index)
 
     out = out[out["n_samples"] >= min_samples]
     out = out.rename_axis("language").reset_index()

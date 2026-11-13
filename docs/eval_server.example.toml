@@ -32,7 +32,7 @@ per_language_metrics = false
 
 # Evaluation dataset: texts only. Submissions use the global budget.
 [[datasets]]
-id = "commonlid"
+id = "commonlid_nano"
 metrics = ["macro.f1_gold_only"]
 max_submissions = 3          # optional cap for this dataset on top of the global one
 # How predictions match gold labels: "exact" (default, as on the
@@ -44,8 +44,35 @@ description = "Texts sampled from real-world web data (Common Crawl)."  # shown 
 # Development dataset: items include their gold "label", so the agent can
 # check its approach. Its submissions only count against its own cap, and
 # per-language metrics are allowed. The server refuses to start if it shares
-# texts with an evaluation dataset (commonlid_nano is a subset of commonlid,
-# for example, so it cannot be the dev set for commonlid).
+# texts with an evaluation dataset.
+#
+# This one is derived from the full CommonLID: without the texts of
+# commonlid_nano (the evaluation set above) and texts under 20 characters,
+# then a stratified sample as for the nano sets (5 texts per language plus
+# 1000 spread in proportion). The seed makes the sample reproducible.
+[[datasets]]
+id = "commonlid_dev"
+source = "commonlid"
+exclude = ["commonlid_nano"]
+min_chars = 20
+sample = { max_size = 1000, min_per_language = 5, seed = 1 }
+expose_labels = true
+max_submissions = 20
+metrics = ["macro.f1_gold_only", "micro.f1_gold_only", "per_language.f1"]
+
+# More labelled data that shares no text with either set above: excluding a
+# dataset of this config removes the texts it serves.
+[[datasets]]
+id = "commonlid_train"
+source = "commonlid"
+exclude = ["commonlid_nano", "commonlid_dev"]
+min_chars = 20
+sample = { max_size = 5000, seed = 2 }
+expose_labels = true
+max_submissions = 20
+metrics = ["macro.f1_gold_only"]
+
+# Any registered dataset works as a development dataset too.
 [[datasets]]
 id = "flores_dev"
 expose_labels = true
