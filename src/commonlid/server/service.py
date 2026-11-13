@@ -32,6 +32,7 @@ from commonlid.core.lid_model import LIDModel
 from commonlid.evaluation.results import Result, text_hash, write_predictions, write_summary
 from commonlid.metrics.core import UND_TOKEN, compute_per_language_metrics
 from commonlid.server.config import PER_LANGUAGE_PREFIX, DatasetConfig, ServerConfig
+from commonlid.server.derive import DerivationError, derive, normalize_text
 
 if TYPE_CHECKING:
     from commonlid.core.lid_dataset import LIDDataset
@@ -95,6 +96,10 @@ class LabelOverlapError(StartupError):
     """A dataset with exposed labels contains texts of an evaluation dataset."""
 
 
+class DatasetBuildError(StartupError):
+    """A configured dataset cannot be loaded or derived."""
+
+
 def check_prediction(raw: str | None) -> tuple[str | None, bool]:
     """Validate one submitted prediction.
 
@@ -123,8 +128,8 @@ def check_prediction(raw: str | None) -> tuple[str | None, bool]:
 class _ServedDataset:
     """A dataset in served order: position ``i`` is the item with id ``i``.
 
-    ``order[i]`` is that item's position in the dataset (the ``idx`` of
-    ``commonlid run`` predictions).
+    ``order[i]`` is that item's position in the source dataset (the ``idx`` of
+    ``commonlid run`` predictions on it).
     """
 
     config: DatasetConfig
@@ -138,11 +143,26 @@ class _ServedDataset:
         """Hash of the served texts in served order.
 
         It changes whenever an item id would point to a different text: a
-        new shuffle seed, another ``limit`` or changed dataset contents.
+        new shuffle seed, another ``limit``, filter or sample, or changed
+        dataset contents.
         """
         digest = hashlib.sha256()
         for text in self.texts:
             digest.update(text_hash(text).encode("ascii"))
+        return digest.hexdigest()[:16]
+
+    @property
+    def content_hash(self) -> str:
+        """Hash of the texts and labels, independent of the served order.
+
+        Two servers with the same dataset config serve the same items when
+        their content hashes match, whatever their shuffle seeds.
+        """
+        digest = hashlib.sha256()
+        for item in sorted(
+            f"{text_hash(t)}\t{g}" for t, g in zip(self.texts, self.golds, strict=True)
+        ):
+            digest.update(item.encode("utf-8"))
         return digest.hexdigest()[:16]
 
 
@@ -220,10 +240,15 @@ class ScoringService:
         self._lock = threading.Lock()
         self._submissions: list[dict[str, Any]] = []
         state = self._load_state()
-        self._datasets: dict[str, _ServedDataset] = {}
-        for ds_config in config.datasets:
-            dataset = datasets[ds_config.id] if datasets is not None else None
-            self._datasets[ds_config.id] = self._load_dataset(ds_config, dataset, self._seed)
+        self._injected = dict(datasets or {})
+        self._sources: dict[str, tuple[LIDDataset, Any]] = {}
+        built: dict[str, _ServedDataset] = {}
+        self._datasets = built
+        for ds_config in config.build_order():
+            built[ds_config.id] = self._load_dataset(ds_config, self._seed)
+        # Listed in config order, whatever order the exclusions required.
+        self._datasets = {ds.id: built[ds.id] for ds in config.datasets}
+        self._sources.clear()
         self._check_label_overlap()
         self._check_fingerprints(state.get("datasets", {}))
         self._warn_per_language()
@@ -273,6 +298,7 @@ class ScoringService:
                     "n_items": len(served.texts),
                     "revision": served.revision,
                     "fingerprint": served.fingerprint,
+                    "content_hash": served.content_hash,
                 }
                 for ds_id, served in self._datasets.items()
             },
@@ -295,15 +321,15 @@ class ScoringService:
                 continue
             if self._used(ds_id) == 0:
                 logger.warning(
-                    "Items of %s changed since the last start (shuffle seed, limit or "
-                    "dataset revision); no submissions yet, so the new order is used.",
+                    "Items of %s changed since the last start (shuffle seed, dataset "
+                    "settings or revision); no submissions yet, so the new order is used.",
                     ds_id,
                 )
                 continue
             path = self._state_path
             msg = (
                 f"the items served for {ds_id!r} changed since the last start (shuffle "
-                f"seed, limit or dataset revision), so ids from earlier inputs would "
+                f"seed, dataset settings such as limit, exclude or sample, or revision), so ids from earlier inputs would "
                 f"point to other texts. {self._used(ds_id)} submission(s) were already "
                 f"accepted. Restore the previous settings, or delete {path} to start over "
                 "(this resets the submission counter)."
@@ -314,10 +340,11 @@ class ScoringService:
         """Refuse to start if a dev dataset would reveal labels of an evaluation dataset.
 
         ``commonlid_nano`` is a subset of ``commonlid``, for example: exposing
-        its labels would hand out part of the test set.
+        its labels would hand out part of the test set. Texts are compared after
+        whitespace and Unicode normalisation.
         """
         exposed = {
-            ds_id: set(served.texts)
+            ds_id: set(map(normalize_text, served.texts))
             for ds_id, served in self._datasets.items()
             if served.config.expose_labels
         }
@@ -327,7 +354,7 @@ class ScoringService:
         for ds_id, served in self._datasets.items():
             if served.config.expose_labels:
                 continue
-            texts = set(served.texts)
+            texts = set(map(normalize_text, served.texts))
             for dev_id, dev_texts in exposed.items():
                 shared = len(texts & dev_texts)
                 if shared:
@@ -364,33 +391,97 @@ class ScoringService:
 
     # --------------------------------------------------------------- datasets
 
-    def _load_dataset(
-        self, ds_config: DatasetConfig, dataset: LIDDataset | None, seed: int
-    ) -> _ServedDataset:
-        if dataset is None:
-            from commonlid.core.registry import get_dataset
+    def _source(self, dataset_id: str) -> tuple[LIDDataset, Any] | None:
+        """A registered (or injected) dataset and its full HF dataset, loaded once."""
+        if dataset_id not in self._sources:
+            dataset = self._injected.get(dataset_id)
+            if dataset is None:
+                from commonlid.core.registry import list_datasets
 
-            dataset = get_dataset(ds_config.id)
-        logger.info("Loading dataset %s (limit=%s) ...", ds_config.id, ds_config.limit)
-        hf = dataset.load(limit=ds_config.limit)
+                if dataset_id not in list_datasets():
+                    return None
+                from commonlid.core.registry import get_dataset
+
+                dataset = get_dataset(dataset_id)
+            logger.info("Loading dataset %s ...", dataset_id)
+            self._sources[dataset_id] = (dataset, dataset.load())
+        return self._sources[dataset_id]
+
+    def _excluded_texts(self, ds_config: DatasetConfig) -> set[str]:
+        """Normalised texts of every dataset ``ds_config`` excludes.
+
+        A registered dataset is excluded in full, whatever limit or filters it
+        is served with; a dataset of this config as it is served. A name that
+        is both is excluded as both.
+        """
+        keys: set[str] = set()
+        for name in ds_config.exclude:
+            source = self._source(name)
+            served = self._datasets.get(name)
+            if source is None and served is None:
+                msg = (
+                    f"dataset {ds_config.id!r} excludes {name!r}, which is neither a "
+                    "registered dataset (`commonlid list-datasets`) nor a dataset in this config"
+                )
+                raise DatasetBuildError(msg)
+            if source is not None:
+                dataset, hf = source
+                keys.update(map(normalize_text, hf[dataset.text_column]))
+            if served is not None:
+                keys.update(map(normalize_text, served.texts))
+        return keys
+
+    def _load_dataset(self, ds_config: DatasetConfig, seed: int) -> _ServedDataset:
+        source = self._source(ds_config.source_id)
+        if source is None:
+            what = "source" if ds_config.source else "dataset"
+            msg = (
+                f"unknown {what} {ds_config.source_id!r} for {ds_config.id!r}; "
+                "see `commonlid list-datasets`"
+            )
+            raise DatasetBuildError(msg)
+        dataset, hf = source
         texts = list(hf[dataset.text_column])
         golds = list(hf[dataset.target_column])
-        order = list(range(len(texts)))
+        try:
+            derivation = derive(
+                ds_config, texts, golds, excluded=lambda: self._excluded_texts(ds_config)
+            )
+        except DerivationError as exc:
+            raise DatasetBuildError(str(exc)) from exc
+        if len(derivation.steps) > 1:
+            logger.info(
+                "Derived %s from %s: %s",
+                ds_config.id,
+                ds_config.source_id,
+                derivation.describe(),
+            )
+        if not derivation.positions:
+            msg = f"dataset {ds_config.id!r} is empty after {derivation.describe()}"
+            raise DatasetBuildError(msg)
+
+        # `served` holds positions into `derivation.positions`; `order` maps
+        # each id to the item's position in the source dataset.
+        served = list(range(len(derivation.positions)))
         if self.config.shuffle:
-            random.Random(f"{seed}:{ds_config.id}").shuffle(order)
-        logger.info(
-            "Serving %s: %d items%s",
-            ds_config.id,
-            len(texts),
-            " (labels exposed)" if ds_config.expose_labels else "",
-        )
-        return _ServedDataset(
+            random.Random(f"{seed}:{ds_config.id}").shuffle(served)
+        order = [derivation.positions[k] for k in served]
+        result = _ServedDataset(
             config=ds_config,
             revision=dataset.hf_revision,
             texts=[texts[i] for i in order],
             golds=[golds[i] for i in order],
             order=order,
         )
+        logger.info(
+            "Serving %s: %d items, %d languages, content hash %s%s",
+            ds_config.id,
+            len(order),
+            len(set(result.golds)),
+            result.content_hash,
+            " (labels exposed)" if ds_config.expose_labels else "",
+        )
+        return result
 
     def _get(self, dataset_id: str) -> _ServedDataset:
         try:

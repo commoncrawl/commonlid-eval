@@ -22,7 +22,9 @@ from commonlid.server.config import (
     load_config,
     parse_config,
 )
+from commonlid.server.derive import normalize_text
 from commonlid.server.service import (
+    DatasetBuildError,
     InvalidSubmissionError,
     LabelOverlapError,
     ScoringService,
@@ -178,6 +180,20 @@ def test_parse_config_zero_means_unlimited() -> None:
         ({"datasets": [{"id": "x", "macro_match": "loose"}]}, "macro_match must be one of"),
         ({"datasets": [{"id": "x", "expose_labels": "yes"}]}, "expose_labels"),
         ({"datasets": [{"id": "x", "description": " "}]}, "description"),
+        ({"datasets": [{"id": "x", "source": ""}]}, "source must be"),
+        ({"datasets": [{"id": "x", "exclude": [1]}]}, "exclude must be a list"),
+        ({"datasets": [{"id": "x", "exclude": ["x"]}]}, "cannot exclude itself"),
+        ({"datasets": [{"id": "x", "min_chars": -1}]}, "min_chars must be a non-negative"),
+        ({"datasets": [{"id": "x", "min_chars": 9, "max_chars": 5}]}, "not be larger"),
+        ({"datasets": [{"id": "x", "sample": 100}]}, "sample must be a table"),
+        ({"datasets": [{"id": "x", "sample": {"max_size": 10}}]}, "needs seed"),
+        ({"datasets": [{"id": "x", "sample": {"seed": 1}}]}, "needs max_size"),
+        ({"datasets": [{"id": "x", "sample": {"max_size": 0, "seed": 1}}]}, "positive"),
+        ({"datasets": [{"id": "x", "sample": {"max_size": 5, "seed": 1, "n": 2}}]}, "unknown"),
+        (
+            {"datasets": [{"id": "a", "exclude": ["b"]}, {"id": "b", "exclude": ["a"]}]},
+            "cycle: a -> b -> a",
+        ),
     ],
 )
 def test_parse_config_rejects_invalid(raw: dict[str, Any], match: str) -> None:
@@ -219,6 +235,31 @@ def test_load_config_resolves_state_dir_relative_to_file(tmp_path: Path) -> None
     assert cfg.max_submissions == 2
     assert cfg.port == 9000
     assert cfg.datasets[0].metrics == ("macro.f1_gold_only", "per_language.f1")
+
+
+def test_parse_derived_dataset() -> None:
+    cfg = parse_config({
+        "datasets": [
+            {"id": "train", "source": "pool", "exclude": ["test", "dev"]},
+            {
+                "id": "dev",
+                "source": "pool",
+                "exclude": "test",
+                "min_chars": 20,
+                "sample": {"max_size": 100, "seed": 7},
+            },
+            {"id": "test"},
+        ]
+    })
+    train, dev, test = cfg.datasets
+    assert (train.source_id, dev.source_id, test.source_id) == ("pool", "pool", "test")
+    assert dev.exclude == ("test",)
+    assert dev.sample is not None
+    assert (dev.sample.max_size, dev.sample.seed, dev.sample.min_per_language) == (100, 7, 5)
+    assert test.sample is None
+    assert test.exclude == ()
+    # Each dataset is built after the configured datasets it excludes.
+    assert [d.id for d in cfg.build_order()] == ["test", "dev", "train"]
 
 
 def test_example_config_is_valid() -> None:
@@ -646,6 +687,149 @@ def test_dev_dataset_sharing_texts_with_an_evaluation_dataset_is_refused() -> No
     cfg = _config(datasets=[{"id": "_fake"}, {"id": "_other", "expose_labels": True}])
     with pytest.raises(LabelOverlapError, match="6 of the 6 texts of '_fake' are in '_other'"):
         ScoringService(cfg, datasets={"_fake": _FakeDataset(), "_other": _OtherDataset()})
+
+
+# ------------------------------------------------------------ derived datasets
+
+
+class _PoolDataset(_FakeDataset):
+    """A larger labelled pool: 20 texts each in three languages, two short texts
+    and whitespace variants of two `_fake` texts."""
+
+    dataset_id = "_pool"
+    SAMPLES: ClassVar[list[dict[str, str | None]]] = [
+        *(
+            {"text": f"{lang} sentence number {i}", "iso639_3": lang}
+            for lang in ("eng", "deu", "fra")
+            for i in range(20)
+        ),
+        {"text": "ok", "iso639_3": "eng"},
+        {"text": "ja", "iso639_3": "deu"},
+        {"text": " hello   world ", "iso639_3": "eng"},
+        {"text": "hallo\nwelt", "iso639_3": "deu"},
+    ]
+
+
+def _derived_service(datasets: list[dict[str, Any]], **overrides: Any) -> ScoringService:
+    cfg = parse_config({"datasets": datasets, **overrides})
+    return ScoringService(cfg, datasets={"_fake": _FakeDataset(), "_pool": _PoolDataset()})
+
+
+def _texts(service: ScoringService, dataset_id: str) -> set[str]:
+    return {it["text"] for it in service.inputs(dataset_id)["items"]}
+
+
+def test_derived_dataset_excludes_texts_after_normalisation() -> None:
+    service = _derived_service([
+        {"id": "_fake"},
+        {"id": "dev", "source": "_pool", "exclude": ["_fake"], "expose_labels": True},
+    ])
+    dev = _texts(service, "dev")
+    assert len(dev) == len(_PoolDataset.SAMPLES) - 2
+    assert not {normalize_text(t) for t in dev} & set(GOLD_BY_TEXT)
+    # Labels come from the source dataset.
+    gold = {s["text"]: s["iso639_3"] for s in _PoolDataset.SAMPLES}
+    assert all(it["label"] == gold[it["text"]] for it in service.inputs("dev")["items"])
+
+
+def test_excluding_a_registered_dataset_removes_all_of_it() -> None:
+    # `_fake` is served with limit = 1, but `exclude` drops every text of it.
+    service = _derived_service([
+        {"id": "_fake", "limit": 1},
+        {"id": "dev", "source": "_pool", "exclude": ["_fake"], "expose_labels": True},
+    ])
+    assert service.inputs("dev")["total"] == len(_PoolDataset.SAMPLES) - 2
+
+
+def test_overlap_check_compares_normalised_texts() -> None:
+    with pytest.raises(LabelOverlapError, match="2 of the 6 texts of '_fake' are in 'dev'"):
+        _derived_service([{"id": "_fake"}, {"id": "dev", "source": "_pool", "expose_labels": True}])
+
+
+def test_length_filter() -> None:
+    service = _derived_service([
+        {"id": "long", "source": "_pool", "min_chars": 3},
+        {"id": "short", "source": "_pool", "max_chars": 11},
+    ])
+    assert not {"ok", "ja"} & _texts(service, "long")
+    # Whitespace runs count as one character: " hello   world " has 11.
+    assert _texts(service, "short") == {"ok", "ja", " hello   world ", "hallo\nwelt"}
+
+
+def test_sample_is_stratified_and_reproducible() -> None:
+    dev = {"id": "dev", "source": "_pool", "min_chars": 3, "sample": {"max_size": 15, "seed": 1}}
+    first = _derived_service([dev], shuffle_seed=1)
+    again = _derived_service([dev], shuffle_seed=2)
+    other_seed = _derived_service([{**dev, "sample": {"max_size": 15, "seed": 2}}])
+
+    texts = _texts(first, "dev")
+    # 5 per language plus 15 spread proportionally over the two remaining
+    # deu/eng/fra pools (eng and deu also keep one whitespace variant each).
+    assert len(texts) == 30
+    langs = [t.split()[0] for t in texts if "sentence" in t]
+    assert all(langs.count(lang) >= 5 for lang in ("eng", "deu", "fra"))
+    # Same config: same items, whatever the shuffle seed; another seed: other items.
+    assert _texts(again, "dev") == texts
+    assert _texts(other_seed, "dev") != texts
+    assert first._datasets["dev"].content_hash == again._datasets["dev"].content_hash
+    assert first.inputs("dev")["items"] != again.inputs("dev")["items"]
+
+
+def test_disjoint_splits_by_excluding_configured_datasets() -> None:
+    service = _derived_service([
+        {
+            "id": "train",
+            "source": "_pool",
+            "exclude": ["_fake", "dev"],
+            "expose_labels": True,
+        },
+        {
+            "id": "dev",
+            "source": "_pool",
+            "exclude": ["_fake"],
+            "sample": {"max_size": 6, "min_per_language": 2, "seed": 3},
+            "expose_labels": True,
+        },
+        {"id": "_fake"},
+    ])
+    train, dev = _texts(service, "train"), _texts(service, "dev")
+    assert not train & dev
+    assert len(train | dev) == len(_PoolDataset.SAMPLES) - 2
+    # Status lists the datasets in config order.
+    assert [d["id"] for d in service.status()["datasets"]] == ["train", "dev", "_fake"]
+
+
+def test_derived_archive_is_keyed_by_source_position(tmp_path: Path) -> None:
+    service = _derived_service(
+        [{"id": "long", "source": "_pool", "min_chars": 15, "limit": 5}],
+        state_dir=str(tmp_path),
+    )
+    gold = {s["text"]: s["iso639_3"] for s in _PoolDataset.SAMPLES}
+    items = service.inputs("long")["items"]
+    service.submit("long", [(it["id"], gold[it["text"]]) for it in items])
+    rows = tmp_path / "submissions" / "long" / "submission-0001" / "predictions.jsonl"
+    idx = [json.loads(line)["idx"] for line in rows.read_text().splitlines()]
+    assert idx == [0, 1, 2, 3, 4]
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["datasets"]["long"]["content_hash"] == service._datasets["long"].content_hash
+
+
+@pytest.mark.parametrize(
+    ("dataset", "match"),
+    [
+        ({"id": "x", "source": "_nope"}, "unknown source '_nope'"),
+        ({"id": "_nope"}, "unknown dataset '_nope'"),
+        ({"id": "x", "source": "_pool", "exclude": ["_nope"]}, "excludes '_nope'"),
+        ({"id": "x", "source": "_pool", "min_chars": 1000}, "is empty after"),
+        (
+            {"id": "x", "source": "_pool", "sample": {"max_size": 60, "seed": 1}},
+            "only 49 of the 64 remaining texts",
+        ),
+    ],
+)
+def test_derived_dataset_errors(dataset: dict[str, Any], match: str) -> None:
+    with pytest.raises(DatasetBuildError, match=match):
+        _derived_service([dataset])
 
 
 # ------------------------------------------------------------------------ HTTP

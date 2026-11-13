@@ -20,6 +20,17 @@ Example::
     id = "flores_dev"
     limit = 1000
     metrics = ["macro.f1_gold_only", "per_language.f1"]
+
+    # A dataset derived from a registered one: CommonLID without the texts of
+    # commonlid_nano and without texts under 20 characters, then a stratified
+    # sample as for the nano sets.
+    [[datasets]]
+    id = "commonlid_dev"
+    source = "commonlid"
+    exclude = ["commonlid_nano"]
+    min_chars = 20
+    sample = { max_size = 500, min_per_language = 3, seed = 1 }
+    expose_labels = true
 """
 
 from __future__ import annotations
@@ -72,12 +83,46 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class SampleConfig:
+    """Stratified sample, as used for the nano datasets.
+
+    Every language keeps ``min_per_language`` texts (languages with fewer are
+    dropped), and ``max_size`` more texts are spread over the languages in
+    proportion to how many each has left. The result has about
+    ``max_size + min_per_language * n_languages`` texts and depends only on the
+    input and ``seed``.
+    """
+
+    max_size: int
+    seed: int
+    min_per_language: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetConfig:
-    """One dataset exposed by the server."""
+    """One dataset exposed by the server.
+
+    By default ``id`` names a registered dataset that is served as is. A
+    *derived* dataset names a registered ``source`` and changes it, in this
+    order: ``exclude``, ``min_chars`` / ``max_chars``, ``sample``, ``limit``.
+    The same config always yields the same texts.
+    """
 
     id: str
+    #: Registered dataset to derive this one from (``None`` = ``id``).
+    source: str | None = None
+    #: Datasets whose texts are removed (compared after whitespace and Unicode
+    #: normalisation). A registered dataset is excluded in full; a dataset
+    #: defined in this config, as it is served.
+    exclude: tuple[str, ...] = ()
+    #: Drop texts shorter / longer than this many characters (whitespace runs
+    #: count as one character; leading and trailing whitespace is ignored).
+    min_chars: int | None = None
+    max_chars: int | None = None
+    #: Stratified sample of what is left after ``exclude`` and the length filter.
+    sample: SampleConfig | None = None
     metrics: tuple[str, ...] = DEFAULT_METRICS
-    #: Cap on samples served and scored (``None`` = the whole dataset).
+    #: Cap on samples served and scored, applied last (``None`` = the whole dataset).
     limit: int | None = None
     #: Per-dataset submission cap, on top of the global one (``None`` = no extra cap).
     max_submissions: int | None = None
@@ -93,6 +138,11 @@ class DatasetConfig:
     expose_labels: bool = False
     #: Free text shown to the agent in the dataset's instructions.
     description: str | None = None
+
+    @property
+    def source_id(self) -> str:
+        """The registered dataset the texts come from."""
+        return self.source or self.id
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +178,33 @@ class ServerConfig:
                 return ds
         return None
 
+    def build_order(self) -> list[DatasetConfig]:
+        """Datasets ordered so that each comes after the configured ones it excludes."""
+        return _build_order(self.datasets)
+
+
+def _build_order(datasets: tuple[DatasetConfig, ...]) -> list[DatasetConfig]:
+    by_id = {ds.id: ds for ds in datasets}
+    ordered: list[DatasetConfig] = []
+    done: set[str] = set()
+
+    def visit(ds: DatasetConfig, path: tuple[str, ...]) -> None:
+        if ds.id in done:
+            return
+        if ds.id in path:
+            cycle = " -> ".join([*path[path.index(ds.id) :], ds.id])
+            msg = f"datasets exclude each other in a cycle: {cycle}"
+            raise ConfigError(msg)
+        for name in ds.exclude:
+            if name in by_id:
+                visit(by_id[name], (*path, ds.id))
+        done.add(ds.id)
+        ordered.append(ds)
+
+    for ds in datasets:
+        visit(ds, ())
+    return ordered
+
 
 def _optional_positive_int(value: Any, name: str) -> int | None:
     if value is None:
@@ -137,6 +214,77 @@ def _optional_positive_int(value: Any, name: str) -> int | None:
         raise ConfigError(msg)
     # 0 means "no cap", the same convention as the CLI's --limit.
     return value or None
+
+
+def _int(value: Any, name: str, *, minimum: int | None = None) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or (minimum is not None and value < minimum)
+    ):
+        bound = {None: "an integer", 0: "a non-negative integer", 1: "a positive integer"}
+        msg = f"{name} must be {bound.get(minimum, f'an integer >= {minimum}')}, got {value!r}"
+        raise ConfigError(msg)
+    return value
+
+
+def _parse_sample(raw: Any, name: str) -> SampleConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        msg = f"{name} must be a table, e.g. {{ max_size = 1000, seed = 42 }}"
+        raise ConfigError(msg)
+    known = {f.name for f in fields(SampleConfig)}
+    unknown = set(raw) - known
+    if unknown:
+        msg = f"{name} has unknown keys: {sorted(unknown)}"
+        raise ConfigError(msg)
+    missing = [k for k in ("max_size", "seed") if k not in raw]
+    if missing:
+        msg = f"{name} needs {' and '.join(missing)} (the seed makes the sample reproducible)"
+        raise ConfigError(msg)
+    return SampleConfig(
+        max_size=_int(raw["max_size"], f"{name}.max_size", minimum=1),
+        seed=_int(raw["seed"], f"{name}.seed"),
+        min_per_language=_int(
+            raw.get("min_per_language", 5), f"{name}.min_per_language", minimum=0
+        ),
+    )
+
+
+def _parse_derivation(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    """The keys that derive a dataset from a registered one."""
+    where = f"datasets[{index}]"
+    source = raw.get("source")
+    if source is not None and (not isinstance(source, str) or not source):
+        msg = f"{where}.source must be a dataset id"
+        raise ConfigError(msg)
+
+    exclude = raw.get("exclude", [])
+    if isinstance(exclude, str):
+        exclude = [exclude]
+    if not isinstance(exclude, list) or not all(isinstance(e, str) and e for e in exclude):
+        msg = f"{where}.exclude must be a list of dataset ids"
+        raise ConfigError(msg)
+    if raw["id"] in exclude:
+        msg = f"{where} ({raw['id']}) cannot exclude itself"
+        raise ConfigError(msg)
+
+    min_chars, max_chars = (
+        None if raw.get(key) is None else _int(raw[key], f"{where}.{key}", minimum=0)
+        for key in ("min_chars", "max_chars")
+    )
+    if min_chars is not None and max_chars is not None and min_chars > max_chars:
+        msg = f"{where}.min_chars must not be larger than max_chars"
+        raise ConfigError(msg)
+
+    return {
+        "source": source,
+        "exclude": tuple(dict.fromkeys(exclude)),
+        "min_chars": min_chars,
+        "max_chars": max_chars,
+        "sample": _parse_sample(raw.get("sample"), f"{where}.sample"),
+    }
 
 
 def _bool(value: Any, name: str) -> bool:
@@ -215,6 +363,7 @@ def _parse_dataset(raw: Any, index: int, *, per_language_metrics: bool) -> Datas
 
     return DatasetConfig(
         id=raw["id"],
+        **_parse_derivation(raw, index),
         metrics=tuple(dict.fromkeys(metrics)),
         limit=_optional_positive_int(raw.get("limit"), f"datasets[{index}].limit"),
         max_submissions=_optional_positive_int(
@@ -263,6 +412,7 @@ def parse_config(
     if len(set(ids)) != len(ids):
         msg = f"duplicate dataset ids in config: {ids}"
         raise ConfigError(msg)
+    _build_order(datasets)  # rejects datasets that exclude each other in a cycle
 
     state_dir: Path | None = None
     if raw.get("state_dir") is not None:

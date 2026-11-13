@@ -42,12 +42,16 @@ See [`eval_server.example.toml`](eval_server.example.toml).
 | `host` / `port` | `127.0.0.1` / `8000` | Bind address; `--host` / `--port` override. |
 | `api_token` | none | Bearer token required on every endpoint except `/health`. `COMMONLID_SERVER_TOKEN` overrides it. |
 | `per_language_metrics` | `false` | Allow `per_language.*` metrics on evaluation datasets. `COMMONLID_SERVER_PER_LANGUAGE_METRICS=1` (or `0`) overrides it. |
-| `[[datasets]] id` | required | A registered dataset id (`commonlid list-datasets`). |
+| `[[datasets]] id` | required | A registered dataset id (`commonlid list-datasets`), or any name for a dataset with `source`. |
+| `[[datasets]] source` | `id` | Registered dataset to derive this one from ([below](#derived-datasets)). |
+| `[[datasets]] exclude` | none | Datasets whose texts are removed. |
+| `[[datasets]] min_chars` / `max_chars` | none | Drop shorter / longer texts. |
+| `[[datasets]] sample` | none | Stratified sample: `{ max_size = N, seed = S, min_per_language = 5 }`. |
 | `[[datasets]] metrics` | `["macro.f1_gold_only"]` | Metrics returned for this dataset. |
 | `[[datasets]] macro_match` | `"exact"` | How predictions are matched with gold labels: `exact`, `macro` or `sibling` ([below](#matching)). |
 | `[[datasets]] expose_labels` | `false` | Development dataset: serve the gold labels with the inputs ([below](#evaluation-and-development-datasets)). |
 | `[[datasets]] description` | none | Free text added to the dataset's instructions for the agent. |
-| `[[datasets]] limit` | all | Serve and score only the first N samples. |
+| `[[datasets]] limit` | all | Serve and score only the first N samples (after the steps above). |
 | `[[datasets]] max_submissions` | none | Cap for this dataset, on top of the global one. |
 | `[[datasets]] sample_count_threshold` | `0` | Drop languages with fewer gold samples from the metrics. |
 
@@ -95,10 +99,72 @@ already have, so:
 - it may return `per_language.*` metrics without `per_language_metrics`.
 
 The server refuses to start if a development dataset shares any text with an
-evaluation dataset. For example, `commonlid_nano` is a subset of
-`commonlid`, so exposing its labels would hand out part of the test set.
-Good pairs are datasets from different sources, such as `flores_dev` for
-development and `commonlid` for evaluation.
+evaluation dataset (compared after whitespace and Unicode normalisation).
+For example, `commonlid_nano` is a subset of `commonlid`, so exposing the
+labels of `commonlid` would hand out the test set. Use a dataset from
+another source, such as `flores_dev`, or derive one from the same source
+without the evaluation texts, as below.
+
+## Derived datasets
+
+A `[[datasets]]` entry with `source` serves a dataset built from a registered
+one, so dev and train sets need no dataset class. The steps run in this
+order, each on what the previous one left:
+
+1. `exclude`: drop every text that occurs in the listed datasets. A
+   registered dataset is excluded in full, whatever `limit` or filters it is
+   served with in this config; a dataset defined only in this config, as it
+   is served. Texts are compared after whitespace and Unicode normalisation,
+   so duplicates in the source (CommonLID has about 1,800) are caught as well.
+2. `min_chars` / `max_chars`: drop texts outside the length range, counted
+   after collapsing whitespace runs and stripping the ends.
+3. `sample`: the stratified sampler of the nano datasets. Languages with
+   fewer than `min_per_language` texts (default 5) are dropped, every other
+   language keeps `min_per_language` texts, and `max_size` more are spread
+   over the languages in proportion to what each has left: about
+   `max_size + min_per_language × languages` texts in total. `seed` is
+   required.
+4. `limit`: keep the first N.
+
+```toml
+[[datasets]]              # hidden evaluation set
+id = "commonlid_nano"
+
+[[datasets]]              # labelled dev set: no nano texts, nothing under 20 characters
+id = "commonlid_dev"
+source = "commonlid"
+exclude = ["commonlid_nano"]
+min_chars = 20
+sample = { max_size = 1000, seed = 1 }
+expose_labels = true
+
+[[datasets]]              # more labelled data, disjoint from both
+id = "commonlid_train"
+source = "commonlid"
+exclude = ["commonlid_nano", "commonlid_dev"]
+min_chars = 20
+sample = { max_size = 5000, seed = 2 }
+expose_labels = true
+```
+
+Without `sample`, `commonlid_train` would serve everything left (about
+350,000 texts). Datasets are built after the ones they exclude, and a cycle
+is a config error.
+
+The result depends only on the source revision (pinned in its dataset
+class), the excluded datasets and these settings, so the same config yields
+the same items on every machine; the shuffle seed changes only their order
+and ids. At start-up the server logs each step's count and a content hash
+per dataset (also kept in `state.json`); equal hashes mean equal items:
+
+```
+Derived commonlid_dev from commonlid: 373230 -> exclude commonlid_nano: 371708 -> min_chars=20: 351353 -> sample max_size=1000 min_per_language=5 seed=1: 1479
+Serving commonlid_dev: 1479 items, 96 languages, content hash 3373a2d87d89ab15 (labels exposed)
+```
+
+The filters apply to evaluation datasets too (`id = "commonlid_nano"` with
+`min_chars = 20` serves nano without its short texts). In the submission
+archive, `idx` is the position in the source dataset.
 
 ## Matching
 
