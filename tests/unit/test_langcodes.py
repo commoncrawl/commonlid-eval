@@ -23,6 +23,8 @@ from commonlid.preprocess.langcodes import (
         ("ber", ("tzm", _DEPRECATION_TABLE["ber"][1])),
         ("kzj", ("dtp", _DEPRECATION_TABLE["kzj"][1])),
         ("tpw", ("tpn", _DEPRECATION_TABLE["tpw"][1])),
+        ("dan", ("dan", None)),
+        ("daf", (None, _DEPRECATION_TABLE["daf"][1])),
     ],
 )
 def test_conform_langcode_with_reason(raw: str, expected: tuple[str | None, str | None]) -> None:
@@ -59,3 +61,13 @@ def test_convert_and_conform_language_strips_script_suffix() -> None:
 def test_convert_and_conform_language_invalid_code_returns_none() -> None:
     result = convert_and_conform_language(["xxxxxx"])
     assert result == [None]
+
+
+def test_danish_is_kept() -> None:
+    """The research code mapped Danish (``dan``) to ``None``; it is a valid code."""
+    from commonlid.core.lid_model import LIDModel
+
+    assert conform_langcode("dan") == "dan"
+    assert LIDModel._conform("dan") == "dan"
+    assert LIDModel._conform("da") == "dan"
+    assert convert_and_conform_language(["dan", "dan_Latn", "da"]) == ["dan", "dan", "dan"]

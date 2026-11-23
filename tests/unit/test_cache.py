@@ -97,3 +97,37 @@ def test_later_lines_win(tmp_path) -> None:
         True,
         LIDPrediction("eng", 0.5, raw="en"),
     )
+
+
+def test_danish_entries_written_before_the_fix_read_back_as_dan(tmp_path) -> None:
+    """Old caches hold ``"pred": null`` for Danish; the raw output still says Danish."""
+    path = tmp_path / "d" / "m.jsonl"
+    path.parent.mkdir(parents=True)
+    texts = {
+        "glotlid": ("__label__dan_Latn", "dan"),
+        "llm": ("dan", "dan"),
+        "locale": ("da-DK", "dan"),
+        "abstained": (None, None),
+        "unmappable": ("__label__xyz_Zzzz", None),
+        "no raw": (RAW_UNSET, None),
+    }
+    cache = PredictionCache(tmp_path, "m", "d", "r")
+    lines = []
+    for text, (raw, _) in texts.items():
+        cache.put(text, LIDPrediction(None, 0.5, raw))
+    for line in path.read_text(encoding="utf-8").splitlines():
+        lines.append(json.loads(line))
+    assert all(entry["pred"] is None for entry in lines)
+
+    reloaded = PredictionCache(tmp_path, "m", "d", "r")
+    for text, (raw, expected) in texts.items():
+        assert reloaded.get(text) == (True, LIDPrediction(expected, 0.5, raw)), text
+
+
+def test_danish_repair_keeps_other_codes(tmp_path) -> None:
+    cache = PredictionCache(tmp_path, "m", "d", "r")
+    cache.put("t", LIDPrediction("nob", None, "__label__dan_Latn"))
+    assert PredictionCache(tmp_path, "m", "d", "r").get("t") == (
+        True,
+        LIDPrediction("nob", None, "__label__dan_Latn"),
+    )
