@@ -308,6 +308,9 @@ assert list_models() == [
 ]
 assert list_datasets() == [
     "bibles_300", "bibles_300_nano",
+    "chalis_antspeak", "chalis_arabic", "chalis_cyrillic_to_czech",
+    "chalis_cyrillic_to_english", "chalis_diacritics", "chalis_homoglyphs",
+    "chalis_leetspeak", "chalis_single",
     "commonlid", "commonlid_nano",
     "flores_dev", "flores_dev_nano",
     "smolsent_300", "smolsent_300_nano",
@@ -441,6 +444,7 @@ Each registered dataset declares two HF-repo attributes:
 | `smolsent_300_nano` | — |
 | `udhr_nano` | — |
 | `social_media_300_nano` | — |
+| `chalis_*` (8 sections) | `michal-tichy/CHALIS` |
 
 Cache repos, splits, and pinned revisions live on each `LIDDataset` subclass
 in `src/commonlid/datasets/`.
@@ -469,6 +473,41 @@ falls back to `build_from_source()` when the subclass implements it
 
 When neither path resolves, `commonlid.PrivateDatasetAccessError` is raised
 with both the access-request URL and the build-from-source instructions.
+
+### CHALIS
+
+[CHALIS](https://arxiv.org/abs/2606.06088) (Challenging Language
+Identification Samples) is a challenge set for two failure modes: cousin
+languages and non-standard orthography. Upstream ships it as a single JSON
+file. Each section with one label per text is registered as its own dataset:
+
+| `dataset_id` | Texts | Gold languages |
+|---|---|---|
+| `chalis_single` | 2,894 | `ces` `slk` `spa` `cat` `por` `glg` `dan` `nob` `nld`: sentences valid in only one language of a cousin pair |
+| `chalis_cyrillic_to_english` | 6,000 | `bul` `mkd` `rus` `srp` in Latin script (English-style transliteration) |
+| `chalis_cyrillic_to_czech` | 1,500 | `rus` in Latin script (Czech orthography) |
+| `chalis_arabic` | 1,500 | `kaz` in Arabic script |
+| `chalis_diacritics` | 4,500 | `ces` `slk` `vie` without diacritics |
+| `chalis_homoglyphs` | 4,500 | `ces` `slk` `eng` with look-alike Cyrillic/Greek letters |
+| `chalis_antspeak` | 1,500 | `eng` with a space between every letter |
+| `chalis_leetspeak` | 1,500 | `eng` in leetspeak |
+
+- The gold label is the language of the source text, not its script. The
+  framework scores ISO 639-3 codes, so it accepts a transliterated text
+  identified as, say, `srp_Latn`, which the paper counts as wrong.
+- Two sections are not registered, because they do not have exactly one
+  label per text:
+  - `joint`: sentences valid in both languages of a pair, with two labels
+    each;
+  - `non-language`: e-mail addresses, ISBNs and the like, with no label.
+- The pinned revision has 1,500 unlabelled Ukrainian sentences in
+  `cyrilic_to_english`; they are dropped.
+- Every row keeps its position in the upstream section (`index`), the
+  upstream `label` and, for the generated sections, the unmodified
+  `original` text.
+- The upstream sections are smaller than the paper's Table 1 (1,500
+  rather than 10,000 texts per language), so scores differ from the paper by
+  a few points.
 
 ## Language code normalisation
 
