@@ -515,6 +515,8 @@ def test_per_language_metrics_are_logged(caplog: pytest.LogCaptureFixture) -> No
         ("ENG", ("eng", True)),
         (" eng ", ("eng", True)),
         ("iw", ("heb", True)),
+        ("dan", ("dan", False)),
+        ("da", ("dan", True)),
     ],
 )
 def test_check_prediction_accepts_codes(raw: str | None, expected: tuple[str, bool]) -> None:

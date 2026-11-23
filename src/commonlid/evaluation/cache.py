@@ -12,6 +12,12 @@ read back with a ``None`` score and an unknown raw output
 ``pred_raw`` is only written when the raw output is known, so a missing key
 means "unknown" while ``null`` means "the model produced no output". When a
 text appears on several lines, the last one wins.
+
+Until the language-code fix, every Danish code (``dan``) conformed to ``None``,
+so caches written before it hold ``"pred": null`` for Danish outputs. Such an
+entry is read back as ``dan`` when its raw output is a Danish label
+(``__label__dan_Latn``, ``dan``, ``da``). Older entries without a raw output
+cannot be repaired; delete the cache of a local model to predict them again.
 """
 
 from __future__ import annotations
@@ -23,10 +29,27 @@ from pathlib import Path
 
 from commonlid.core.lid_model import RAW_UNSET, LIDPrediction
 
+_DANISH_RAW = frozenset({"da", "dan"})
+
 
 def _digest(model_id: str, dataset_revision: str | None, text: str) -> str:
     key = f"{model_id}|{dataset_revision or ''}|{text}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _is_danish_raw(raw: object) -> bool:
+    """Whether a raw model label is Danish: ``__label__dan_Latn``, ``dan``, ``da-DK``."""
+    if not isinstance(raw, str):
+        return False
+    code = raw.strip().removeprefix("__label__").replace("-", "_").split("_", 1)[0]
+    return code.lower() in _DANISH_RAW
+
+
+def _repair_pred(pred: str | None, raw: object) -> str | None:
+    """Undo the old ``dan`` -> ``None`` conformation (see the module docstring)."""
+    if pred is None and _is_danish_raw(raw):
+        return "dan"
+    return pred
 
 
 class PredictionCache:
@@ -56,7 +79,7 @@ class PredictionCache:
                 entry = json.loads(line)
                 raw = entry.get("pred_raw", RAW_UNSET)
                 self._store[entry["text_hash"]] = LIDPrediction(
-                    entry["pred"], entry.get("score"), raw
+                    _repair_pred(entry["pred"], raw), entry.get("score"), raw
                 )
 
     def get(self, text: str) -> tuple[bool, LIDPrediction]:

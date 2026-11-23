@@ -1,9 +1,10 @@
 """ISO 639 language code normalisation.
 
-Ported verbatim from the research repo's ``langid_models.conform_langcode*``
+Ported from the research repo's ``langid_models.conform_langcode*``
 and ``langid_datasets.convert_and_conform_language``. The deprecation
 messages are copied from the ``iso639-lang`` package's exceptions at the
-versions used in the paper.
+versions used in the paper. One deliberate difference: the entry for the
+retired code ``daf`` was keyed on ``dan`` (Danish) in the research code.
 """
 
 from __future__ import annotations
@@ -67,10 +68,10 @@ _DEPRECATION_TABLE: dict[str, tuple[str | None, str | None]] = {
         "As of 2016-01-15, [kzj] for Coastal Kadazan is deprecated due to merge. "
         "Use [dtp] instead.",
     ),
-    # NOTE: the research code keyed this mapping on 'dan' by mistake; the table still only
-    # fired when someone looked up 'dan' (Danish) with an empty result. We keep the
-    # behaviour bug-for-bug so parity tests pass, and document it here.
-    "dan": (
+    # The research code (and this port, until the fix) keyed this entry on 'dan', which
+    # is Danish, so every Danish code conformed to None. The message is about the retired
+    # code of the Dan language, [daf].
+    "daf": (
         None,
         "As of 2013-01-23, [daf] for Dan is deprecated due to split. "
         "Split into Dan [dnj] and Kla-Dan [lda].",
